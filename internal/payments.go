@@ -54,6 +54,10 @@ func (p *Payments) SetLogger(logger services.LogHandler) {
 
 func (p *Payments) PayTransaction(transactionId int) error {
 
+	if p.database == nil {
+		return fmt.Errorf("database not set")
+	}
+
 	transaction, err := p.database.GetTransaction(transactionId)
 	if err != nil {
 		p.logger.Error("payment: failed to get transaction: %s", err)

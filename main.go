@@ -1,4 +1,4 @@
-package electrum
+package main
 
 import (
 	"electrum/config"

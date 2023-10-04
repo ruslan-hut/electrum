@@ -88,7 +88,7 @@ func (s *Server) payTransaction(w http.ResponseWriter, _ *http.Request, ps httpr
 
 	err = s.payments.PayTransaction(id)
 	if err != nil {
-		s.logger.Error("pay transaction", err)
+		s.logger.Error(fmt.Sprintf("pay transaction %v", id), err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
