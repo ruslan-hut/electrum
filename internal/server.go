@@ -55,17 +55,16 @@ func (s *Server) Start() error {
 	}
 
 	serverAddress := fmt.Sprintf("%s:%s", s.conf.Listen.BindIP, s.conf.Listen.Port)
-	s.logger.Info(fmt.Sprintf("starting on %s", serverAddress))
 	listener, err := net.Listen("tcp", serverAddress)
 	if err != nil {
 		return err
 	}
 
 	if s.conf.Listen.TLS {
-		s.logger.Info("starting https TLS")
+		s.logger.Info(fmt.Sprintf("starting https TLS on %s", serverAddress))
 		err = s.httpServer.ServeTLS(listener, s.conf.Listen.CertFile, s.conf.Listen.KeyFile)
 	} else {
-		s.logger.Info("starting http")
+		s.logger.Info(fmt.Sprintf("starting http on %s", serverAddress))
 		err = s.httpServer.Serve(listener)
 	}
 

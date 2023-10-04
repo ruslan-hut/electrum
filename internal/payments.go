@@ -2,14 +2,13 @@ package internal
 
 import (
 	"bytes"
-	"crypto/aes"
 	"crypto/cipher"
+	"crypto/des"
 	"crypto/hmac"
 	"crypto/sha256"
 	"electrum/models"
 	"electrum/services"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -60,23 +59,28 @@ func (p *Payments) PayTransaction(transactionId int) error {
 
 	transaction, err := p.database.GetTransaction(transactionId)
 	if err != nil {
-		p.logger.Error("payment: failed to get transaction: %s", err)
+		p.logger.Error(fmt.Sprintf("failed to get transaction %v", transactionId), err)
 		return err
 	}
 
 	amount := transaction.PaymentAmount - transaction.PaymentBilled
-	if amount <= 0 || transaction.IsFinished || transaction.Username == "" {
+	if amount <= 0 || !transaction.IsFinished || transaction.Username == "" {
+		p.logger.Warn(fmt.Sprintf("transaction %v is not finished or amount is zero", transactionId))
 		return nil
 	}
 
 	tag, err := p.database.GetUserTag(transaction.IdTag)
 	if err != nil {
-		p.logger.Error("payment: failed to get user tag: %s", err)
+		p.logger.Error("failed to get user tag", err)
 		return err
+	}
+	if tag.UserId == "" {
+		p.logger.Warn(fmt.Sprintf("empty user id for tag %v", tag.IdTag))
+		return fmt.Errorf("empty user id")
 	}
 	paymentMethod, err := p.database.GetPaymentMethod(tag.UserId)
 	if err != nil {
-		p.logger.Error("payment: failed to get payment method: %s", err)
+		p.logger.Error("failed to get payment method", err)
 		return err
 	}
 	consumed := (transaction.MeterStop - transaction.MeterStart) / 1000
@@ -109,7 +113,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 
 	err = p.database.SavePaymentOrder(&paymentOrder)
 	if err != nil {
-		p.logger.Error("payment: failed to save paymentOrder: %s", err)
+		p.logger.Error("failed to save order", err)
 		return err
 	}
 
@@ -130,14 +134,14 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	}
 
 	// encode parameters to Base64
-	parametersBase64, err := createParameters(&parameters)
+	parametersBase64, err := p.createParameters(&parameters)
 	if err != nil {
-		p.logger.Error("payment: failed to create parameters: %s", err)
+		p.logger.Error("failed to create parameters", err)
 		return err
 	}
-	signature, err := createSignature(order, parametersBase64, secret)
+	signature, err := p.createSignature(order, parametersBase64, secret)
 	if err != nil {
-		p.logger.Error("payment: failed to create signature: %s", err)
+		p.logger.Error("failed to create signature", err)
 		return err
 	}
 
@@ -148,40 +152,47 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	}
 	requestData, err := json.Marshal(request)
 	if err != nil {
-		p.logger.Error("payment: failed to create request: %s", err)
+		p.logger.Error("failed to create request", err)
 		return err
 	}
+	p.logger.Info(fmt.Sprintf("request: %s", string(requestData)))
+	//decodedParameters, err := base64.StdEncoding.DecodeString(parametersBase64)
+	//if err != nil {
+	//	return err
+	//}
+	//p.logger.Info(fmt.Sprintf("parameters: %s", decodedParameters))
 
 	response, err := http.Post(apiUrl, "application/json", bytes.NewBuffer(requestData))
 	if err != nil {
-		p.logger.Error("payment: failed to send request: %s", err)
+		p.logger.Error("failed to send request", err)
 		return err
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			p.logger.Error("payment: failed to close response body: %s", err)
+			p.logger.Error("failed to close response body", err)
 		}
 	}(response.Body)
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		p.logger.Error("payment: failed to read response body: %s", err)
+		p.logger.Error("failed to read response body", err)
 		return err
 	}
 
-	var paymentResponse models.PaymentRequest
-	err = json.Unmarshal(body, &paymentResponse)
-	if err != nil {
-		p.logger.Warn(fmt.Sprintf("payment: response: %s", string(body)))
-		p.logger.Error("payment: failed to parse response: %s", err)
-		return err
-	}
+	//var paymentResponse models.PaymentRequest
+	//err = json.Unmarshal(body, &paymentResponse)
+	//if err != nil {
+	//	p.logger.Warn(fmt.Sprintf("response: %s", string(body)))
+	//	p.logger.Error("failed to parse response", err)
+	//	return err
+	//}
+	p.logger.Info(fmt.Sprintf("response: %s", string(body)))
 
 	return nil
 }
 
-func createParameters(parameters *models.MerchantParameters) (string, error) {
+func (p *Payments) createParameters(parameters *models.MerchantParameters) (string, error) {
 	// convert parameters to JSON string
 	parametersJson, err := json.Marshal(parameters)
 	if err != nil {
@@ -191,16 +202,15 @@ func createParameters(parameters *models.MerchantParameters) (string, error) {
 	return base64.StdEncoding.EncodeToString(parametersJson), nil
 }
 
-func createSignature(order, parameters, secret string) (string, error) {
-	// decode signature from Base64
-	signatureBase64, err := base64.StdEncoding.DecodeString(secret)
+func (p *Payments) createSignature(order, parameters, secret string) (string, error) {
+
+	key, err := base64.StdEncoding.DecodeString(secret)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("decode secret: %v", err)
 	}
-	// convert signature to Hexadecimal
-	signatureHex := hex.EncodeToString(signatureBase64)
+
 	// encrypt signature with 3DES
-	signatureEncrypted, err := encrypt3DES(signatureHex, order)
+	signatureEncrypted, err := encrypt3DES([]byte(order), key)
 	if err != nil {
 		return "", err
 	}
@@ -216,25 +226,25 @@ func mac256(message string, key []byte) []byte {
 	return mac.Sum(nil)
 }
 
-func encrypt3DES(secretKc, order string) ([]byte, error) {
-	// Convert secretKc and order to byte arrays
-	key, err := hex.DecodeString(secretKc)
+func encrypt3DES(message, key []byte) ([]byte, error) {
+	block, err := des.NewTripleDESCipher(key)
 	if err != nil {
 		return nil, err
 	}
+	iv := make([]byte, 8) // 8 bytes for DES and 3DES
 
-	iv := []byte(order) // Use order as IV
-
-	// Create a new 3DES cipher
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
+	// Pad the message to be a multiple of the block size
+	padding := 8 - len(message)%8
+	if padding == 8 {
+		padding = 0
 	}
+	padText := bytes.Repeat([]byte("0"), padding)
+	message = append(message, padText...)
 
-	// Encrypt with 3DES
-	ciphertext := make([]byte, len(iv))
-	stream := cipher.NewCTR(block, iv)
-	stream.XORKeyStream(ciphertext, iv)
+	ciphertext := make([]byte, len(message))
+
+	mode := cipher.NewCBCEncrypter(block, iv)
+	mode.CryptBlocks(ciphertext, message)
 
 	return ciphertext, nil
 }

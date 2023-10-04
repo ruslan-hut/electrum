@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	collectionLog            = "log"
+	collectionLog            = "payment_log"
 	collectionUserTags       = "user_tags"
 	collectionTransactions   = "transactions"
 	collectionPaymentMethods = "payment_methods"
