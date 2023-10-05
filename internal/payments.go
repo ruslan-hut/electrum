@@ -2,10 +2,6 @@ package internal
 
 import (
 	"bytes"
-	"crypto/cipher"
-	"crypto/des"
-	"crypto/hmac"
-	"crypto/sha256"
 	"electrum/models"
 	"electrum/services"
 	"encoding/base64"
@@ -139,7 +135,9 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		p.logger.Error("failed to create parameters", err)
 		return err
 	}
-	signature, err := p.createSignature(order, parametersBase64, secret)
+
+	encryptor := NewEncryptor(secret, parametersBase64, order)
+	signature, err := encryptor.CreateSignature()
 	if err != nil {
 		p.logger.Error("failed to create signature", err)
 		return err
@@ -200,51 +198,4 @@ func (p *Payments) createParameters(parameters *models.MerchantParameters) (stri
 	}
 	// encode parameters to Base64
 	return base64.StdEncoding.EncodeToString(parametersJson), nil
-}
-
-func (p *Payments) createSignature(order, parameters, secret string) (string, error) {
-
-	key, err := base64.StdEncoding.DecodeString(secret)
-	if err != nil {
-		return "", fmt.Errorf("decode secret: %v", err)
-	}
-
-	// encrypt signature with 3DES
-	signatureEncrypted, err := encrypt3DES([]byte(order), key)
-	if err != nil {
-		return "", err
-	}
-	// create hash with SHA256
-	hash := mac256(parameters, signatureEncrypted)
-	// encode hash to Base64
-	return base64.StdEncoding.EncodeToString(hash), nil
-}
-
-func mac256(message string, key []byte) []byte {
-	mac := hmac.New(sha256.New, key)
-	mac.Write([]byte(message))
-	return mac.Sum(nil)
-}
-
-func encrypt3DES(message, key []byte) ([]byte, error) {
-	block, err := des.NewTripleDESCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	iv := make([]byte, 8) // 8 bytes for DES and 3DES
-
-	// Pad the message to be a multiple of the block size
-	padding := 8 - len(message)%8
-	if padding == 8 {
-		padding = 0
-	}
-	padText := bytes.Repeat([]byte("0"), padding)
-	message = append(message, padText...)
-
-	ciphertext := make([]byte, len(message))
-
-	mode := cipher.NewCBCEncrypter(block, iv)
-	mode.CryptBlocks(ciphertext, message)
-
-	return ciphertext, nil
 }
