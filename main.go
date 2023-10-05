@@ -31,7 +31,7 @@ func main() {
 		logger.Info("mongo client initialized")
 	}
 
-	payments := internal.NewPayments()
+	payments := internal.NewPayments(conf)
 	payments.SetLogger(internal.NewLogger("payments", conf.IsDebug, mongo))
 	payments.SetDatabase(mongo)
 

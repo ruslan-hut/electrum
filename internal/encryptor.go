@@ -11,22 +11,22 @@ import (
 )
 
 type Encryptor struct {
-	Secret     string // signature encoded with Base64
-	Parameters string
-	Order      string // order number to be encrypted
+	secret     string // signature encoded with Base64
+	parameters string
+	order      string // order number to be encrypted
 }
 
 func NewEncryptor(secret string, parameters string, order string) *Encryptor {
 	return &Encryptor{
-		Secret:     secret,
-		Parameters: parameters,
-		Order:      order,
+		secret:     secret,
+		parameters: parameters,
+		order:      order,
 	}
 }
 
 func (e *Encryptor) CreateSignature() (string, error) {
 
-	key, err := base64.StdEncoding.DecodeString(e.Secret)
+	key, err := base64.StdEncoding.DecodeString(e.secret)
 	if err != nil {
 		return "", fmt.Errorf("decode secret: %v", err)
 	}
@@ -34,10 +34,10 @@ func (e *Encryptor) CreateSignature() (string, error) {
 	keyBytes := e.toByteArray(keyHex)
 
 	// encrypt signature with 3DES
-	signatureEncrypted := e.encrypt3DES([]byte(e.Order), keyBytes)
+	signatureEncrypted := e.encrypt3DES([]byte(e.order), keyBytes)
 
 	// create hash with SHA256
-	hash := e.mac256(e.Parameters, signatureEncrypted)
+	hash := e.mac256(e.parameters, signatureEncrypted)
 	// encode hash to Base64
 	return base64.StdEncoding.EncodeToString(hash), nil
 }

@@ -26,6 +26,12 @@ type Config struct {
 		Password string `yaml:"password" env-default:"pass"`
 		Database string `yaml:"database" env-default:""`
 	} `yaml:"mongo"`
+	Merchant struct {
+		Secret   string `yaml:"secret" env-default:"123456789012345678901234"`
+		Code     string `yaml:"code" env-default:"1234567890"`
+		Terminal string `yaml:"terminal" env-default:"123"`
+		Test     bool   `yaml:"test" env-default:"true"`
+	} `yaml:"merchant"`
 }
 
 var instance *Config

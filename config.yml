@@ -17,3 +17,8 @@ mongo:
   user: admin
   password: pass
   database: evsys
+merchant:
+  secret: 123456789012345678901234
+  code: 1234567890
+  terminal: 123
+  test: true

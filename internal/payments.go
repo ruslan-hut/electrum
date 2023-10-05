@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bytes"
+	"electrum/config"
 	"electrum/models"
 	"electrum/services"
 	"encoding/base64"
@@ -14,19 +15,20 @@ import (
 )
 
 const (
-	// for tests: https://sis-t.redsys.es:25443/sis/rest/trataPeticionREST
-	// production: https://sis.redsys.es/sis/rest/trataPeticionREST
-	apiUrl = "https://sis-t.redsys.es:25443/sis/rest/trataPeticionREST"
+	testUrl = "https://sis-t.redsys.es:25443/sis/rest/trataPeticionREST"
+	prodUrl = "https://sis.redsys.es/sis/rest/trataPeticionREST"
 )
 
 type Payments struct {
+	conf     *config.Config
 	database services.Database
 	logger   services.LogHandler
 	mutex    *sync.Mutex
 }
 
-func NewPayments() *Payments {
+func NewPayments(config *config.Config) *Payments {
 	return &Payments{
+		conf:  config,
 		mutex: &sync.Mutex{},
 	}
 }
@@ -48,9 +50,14 @@ func (p *Payments) SetLogger(logger services.LogHandler) {
 }
 
 func (p *Payments) PayTransaction(transactionId int) error {
+	p.Lock()
+	defer p.Unlock()
 
 	if p.database == nil {
 		return fmt.Errorf("database not set")
+	}
+	if p.conf.Merchant.Secret == "" || p.conf.Merchant.Code == "" || p.conf.Merchant.Terminal == "" {
+		return fmt.Errorf("merchant not configured")
 	}
 
 	transaction, err := p.database.GetTransaction(transactionId)
@@ -114,16 +121,16 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	}
 
 	order := fmt.Sprintf("%d", paymentOrder.Order)
-	secret := "sq7HjrUOBfKmC576ILgskD5srU870gJ7"
+	secret := p.conf.Merchant.Secret
 
 	parameters := models.MerchantParameters{
 		Amount:          fmt.Sprintf("%d", amount),
 		Order:           order,
 		Identifier:      paymentOrder.Identifier,
-		MerchantCode:    "358333276",
+		MerchantCode:    p.conf.Merchant.Code,
 		Currency:        "978",
 		TransactionType: "0",
-		Terminal:        "001",
+		Terminal:        p.conf.Merchant.Terminal,
 		DirectPayment:   "true",
 		Exception:       "MIT",
 		Cof:             "N",
@@ -160,6 +167,10 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	//}
 	//p.logger.Info(fmt.Sprintf("parameters: %s", decodedParameters))
 
+	apiUrl := testUrl
+	if !p.conf.Merchant.Test {
+		apiUrl = prodUrl
+	}
 	response, err := http.Post(apiUrl, "application/json", bytes.NewBuffer(requestData))
 	if err != nil {
 		p.logger.Error("failed to send request", err)
