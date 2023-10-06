@@ -18,6 +18,7 @@ const (
 	collectionTransactions   = "transactions"
 	collectionPaymentMethods = "payment_methods"
 	collectionPaymentOrders  = "payment_orders"
+	collectionPayment        = "payment"
 )
 
 type MongoDB struct {
@@ -177,4 +178,62 @@ func (m *MongoDB) GetUserTag(id string) (*models.UserTag, error) {
 		return nil, err
 	}
 	return &userTag, nil
+}
+
+func (m *MongoDB) SavePaymentResult(paymentParameters *models.PaymentParameters) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionPayment)
+	filter := bson.M{"order": paymentParameters.Order}
+	update := bson.M{
+		"$set": paymentParameters, // This will set the fields of the document to the values in paymentParameters
+	}
+	option := options.Update().SetUpsert(true) // If no document is found, create a new one.
+	_, err = collection.UpdateOne(m.ctx, filter, update, option)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *MongoDB) GetPaymentOrder(id int) (*models.PaymentOrder, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
+	filter := bson.D{{"order", id}}
+	var order models.PaymentOrder
+	if err = collection.FindOne(m.ctx, filter).Decode(&order); err != nil {
+		return nil, err
+	}
+	return &order, nil
+}
+
+// UpdateTransaction update transaction billed data
+func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionTransactions)
+	filter := bson.D{{"transaction_id", transaction.Id}}
+	update := bson.D{
+		{"$set", bson.D{
+			{"payment_order", transaction.PaymentOrder},
+			{"payment_billed", transaction.PaymentBilled},
+		}},
+	}
+	if _, err = collection.UpdateOne(m.ctx, filter, update); err != nil {
+		return err
+	}
+	return nil
 }

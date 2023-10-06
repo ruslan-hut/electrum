@@ -8,12 +8,15 @@ type Database interface {
 	GetUserTag(idTag string) (*models.UserTag, error)
 
 	GetTransaction(id int) (*models.Transaction, error)
+	UpdateTransaction(transaction *models.Transaction) error
 
 	GetPaymentMethod(userId string) (*models.PaymentMethod, error)
 
 	GetPaymentOrderByTransaction(transactionId int) (*models.PaymentOrder, error)
 	SavePaymentOrder(order *models.PaymentOrder) error
+	GetPaymentOrder(id int) (*models.PaymentOrder, error)
 	GetLastOrder() (*models.PaymentOrder, error)
+	SavePaymentResult(paymentParameters *models.PaymentParameters) error
 }
 
 type Data interface {
