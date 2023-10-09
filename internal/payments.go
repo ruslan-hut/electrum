@@ -68,7 +68,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	}
 
 	amount := transaction.PaymentAmount - transaction.PaymentBilled
-	if amount <= 0 || !transaction.IsFinished || transaction.Username == "" {
+	if amount <= 0 || !transaction.IsFinished {
 		p.logger.Warn(fmt.Sprintf("transaction %v is not finished or amount is zero", transactionId))
 		return nil
 	}
@@ -80,12 +80,26 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	}
 	if tag.UserId == "" {
 		p.logger.Warn(fmt.Sprintf("empty user id for tag %v", tag.IdTag))
-		return fmt.Errorf("empty user id")
+
+		transaction.PaymentBilled = transaction.PaymentAmount
+		err = p.database.UpdateTransaction(transaction)
+		if err != nil {
+			p.logger.Error("update transaction", err)
+		}
+
+		return fmt.Errorf("id %v not linked to any user", transaction.IdTag)
 	}
 	paymentMethod, err := p.database.GetPaymentMethod(tag.UserId)
 	if err != nil {
 		p.logger.Error("failed to get payment method", err)
-		return err
+
+		transaction.PaymentBilled = transaction.PaymentAmount
+		err = p.database.UpdateTransaction(transaction)
+		if err != nil {
+			p.logger.Error("update transaction", err)
+		}
+
+		return fmt.Errorf("id %v has no payment method", transaction.IdTag)
 	}
 	consumed := (transaction.MeterStop - transaction.MeterStart) / 1000
 	description := fmt.Sprintf("%s:%d %dkW", transaction.ChargePointId, transaction.ConnectorId, consumed)
@@ -259,10 +273,10 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 	}
 
 	if paymentResult.Response != "0000" {
-		p.logger.Info(fmt.Sprintf("error result: %s; order: %s; amount: %s", paymentResult.Response, paymentResult.Order, paymentResult.Amount))
+		p.logger.Warn(fmt.Sprintf("error %s; transaction %v; order %s; amount %s", paymentResult.Response, order.TransactionId, paymentResult.Order, paymentResult.Amount))
 		return
 	}
-	p.logger.Info(fmt.Sprintf("accepted order: %s; amount: %s", paymentResult.Order, paymentResult.Amount))
+	p.logger.Info(fmt.Sprintf("transaction %v; order %s accepted; amount %s", order.TransactionId, paymentResult.Order, paymentResult.Amount))
 
 	if order.TransactionId > 0 {
 
