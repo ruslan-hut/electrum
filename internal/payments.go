@@ -79,7 +79,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		return err
 	}
 	if tag.UserId == "" {
-		p.logger.Warn(fmt.Sprintf("empty user id for tag %v", tag.IdTag))
+		//p.logger.Warn(fmt.Sprintf("empty user id for tag %v", tag.IdTag))
 
 		transaction.PaymentBilled = transaction.PaymentAmount
 		err = p.database.UpdateTransaction(transaction)
@@ -87,11 +87,11 @@ func (p *Payments) PayTransaction(transactionId int) error {
 			p.logger.Error("update transaction", err)
 		}
 
-		return fmt.Errorf("id %v not linked to any user", transaction.IdTag)
+		return fmt.Errorf("empty user id for tag %v", transaction.IdTag)
 	}
 	paymentMethod, err := p.database.GetPaymentMethod(tag.UserId)
 	if err != nil {
-		p.logger.Error("failed to get payment method", err)
+		//p.logger.Error("failed to get payment method", err)
 
 		transaction.PaymentBilled = transaction.PaymentAmount
 		err = p.database.UpdateTransaction(transaction)
