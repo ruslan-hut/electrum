@@ -58,12 +58,50 @@ func (m *MongoDB) GetPaymentMethod(userId string) (*models.PaymentMethod, error)
 	err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
 	if paymentMethod == nil {
 		filter = bson.D{{"user_id", userId}}
-		err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
+		opt := options.FindOne().SetSort(bson.D{{"fail_count", 1}})
+		err = collection.FindOne(m.ctx, filter, opt).Decode(&paymentMethod)
 	}
 	if err != nil {
 		return nil, err
 	}
 	return paymentMethod, nil
+}
+
+func (m *MongoDB) GetPaymentMethodByIdentifier(identifier string) (*models.PaymentMethod, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
+	filter := bson.D{{"identifier", identifier}}
+	var paymentMethod *models.PaymentMethod
+	err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
+	if err != nil {
+		return nil, err
+	}
+	return paymentMethod, nil
+}
+
+func (m *MongoDB) UpdatePaymentMethodFailCount(identifier string, count int) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
+	filter := bson.D{{"identifier", identifier}}
+	update := bson.D{
+		{"$set", bson.D{
+			{"fail_count", count},
+		}},
+	}
+	if _, err = collection.UpdateOne(m.ctx, filter, update); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (m *MongoDB) GetPaymentOrderByTransaction(transactionId int) (*models.PaymentOrder, error) {

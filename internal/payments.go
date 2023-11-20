@@ -110,6 +110,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		orderToClose.Result = "closed without response"
 		orderToClose.TimeClosed = time.Now()
 		_ = p.database.SavePaymentOrder(orderToClose)
+		p.updatePaymentMethodFailCounter(orderToClose.Identifier, 1)
 	}
 
 	paymentOrder := models.PaymentOrder{
@@ -273,9 +274,11 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 	}
 
 	if paymentResult.Response != "0000" {
+		p.updatePaymentMethodFailCounter(order.Identifier, 1)
 		p.logger.Warn(fmt.Sprintf("error %s; transaction %v; order %s; amount %s", paymentResult.Response, order.TransactionId, paymentResult.Order, paymentResult.Amount))
 		return
 	}
+	p.updatePaymentMethodFailCounter(order.Identifier, 0)
 	p.logger.Info(fmt.Sprintf("transaction %v; order %s accepted; amount %s", order.TransactionId, paymentResult.Order, paymentResult.Amount))
 
 	if order.TransactionId > 0 {
@@ -315,4 +318,30 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 
 	}
 
+}
+
+func (p *Payments) updatePaymentMethodFailCounter(identifier string, count int) {
+	if p.database == nil || identifier == "" {
+		return
+	}
+
+	paymentMethod, err := p.database.GetPaymentMethodByIdentifier(identifier)
+	if err != nil {
+		p.logger.Error("get payment method", err)
+		return
+	}
+	if paymentMethod == nil {
+		p.logger.Warn(fmt.Sprintf("payment method %s not found", identifier))
+		return
+	}
+
+	if count == 0 {
+		paymentMethod.FailCount = 0
+	} else {
+		paymentMethod.FailCount++
+	}
+	err = p.database.UpdatePaymentMethodFailCount(identifier, paymentMethod.FailCount)
+	if err != nil {
+		p.logger.Error("update payment method", err)
+	}
 }
