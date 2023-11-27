@@ -54,28 +54,24 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	p.Lock()
 	defer p.Unlock()
 
-	if p.database == nil {
-		return fmt.Errorf("database not set")
-	}
 	if p.conf.Merchant.Secret == "" || p.conf.Merchant.Code == "" || p.conf.Merchant.Terminal == "" {
 		return fmt.Errorf("merchant not configured")
 	}
 
-	transaction, err := p.database.GetTransaction(transactionId)
+	transaction, err := p.getTransaction(transactionId)
 	if err != nil {
-		p.logger.Error(fmt.Sprintf("failed to get transaction %v", transactionId), err)
+		p.logger.Error(fmt.Sprintf("pay transaction %v", transactionId), err)
 		return err
 	}
-
 	amount := transaction.PaymentAmount - transaction.PaymentBilled
-	if amount <= 0 || !transaction.IsFinished {
-		p.logger.Warn(fmt.Sprintf("transaction %v is not finished or amount is zero", transactionId))
+	if amount <= 0 {
+		p.logger.Warn(fmt.Sprintf("transaction %v amount is zero", transactionId))
 		return nil
 	}
 
 	tag, err := p.database.GetUserTag(transaction.IdTag)
 	if err != nil {
-		p.logger.Error("failed to get user tag", err)
+		p.logger.Error("get user tag", err)
 		return err
 	}
 	if tag.UserId == "" {
@@ -132,12 +128,11 @@ func (p *Payments) PayTransaction(transactionId int) error {
 
 	err = p.database.SavePaymentOrder(&paymentOrder)
 	if err != nil {
-		p.logger.Error("failed to save order", err)
+		p.logger.Error("save order", err)
 		return err
 	}
 
 	order := fmt.Sprintf("%d", paymentOrder.Order)
-	secret := p.conf.Merchant.Secret
 
 	parameters := models.MerchantParameters{
 		Amount:          fmt.Sprintf("%d", amount),
@@ -152,18 +147,71 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		Cof:             "N",
 	}
 
-	// encode parameters to Base64
-	parametersBase64, err := p.createParameters(&parameters)
+	request, err := p.newRequest(&parameters)
 	if err != nil {
-		p.logger.Error("create parameters", err)
+		p.logger.Error("pay: create request", err)
 		return err
 	}
+
+	go p.processRequest(request)
+
+	return nil
+}
+
+func (p *Payments) ReturnPayment(transactionId int) error {
+	p.Lock()
+	defer p.Unlock()
+
+	transaction, err := p.getTransaction(transactionId)
+	if err != nil {
+		p.logger.Error(fmt.Sprintf("return transaction %v", transactionId), err)
+		return err
+	}
+	amount := transaction.PaymentAmount
+	if amount <= 0 {
+		p.logger.Warn(fmt.Sprintf("transaction %v amount is zero", transactionId))
+		return nil
+	}
+	order := fmt.Sprintf("%d", transaction.PaymentOrder)
+
+	parameters := models.MerchantParameters{
+		Amount: fmt.Sprintf("%d", amount),
+		Order:  order,
+		//Identifier:      paymentOrder.Identifier,
+		MerchantCode:    p.conf.Merchant.Code,
+		Currency:        "978",
+		TransactionType: "3",
+		Terminal:        p.conf.Merchant.Terminal,
+		//DirectPayment:   "true",
+		//Exception:       "MIT",
+		//Cof:             "N",
+	}
+
+	request, err := p.newRequest(&parameters)
+	if err != nil {
+		p.logger.Error("return: create request", err)
+		return err
+	}
+
+	go p.processRequest(request)
+
+	return nil
+}
+
+func (p *Payments) newRequest(parameters *models.MerchantParameters) (*models.PaymentRequest, error) {
+	// encode parameters to Base64
+	parametersBase64, err := p.createParameters(parameters)
+	if err != nil {
+		return nil, fmt.Errorf("parameters encode base64: %v", err)
+	}
+
+	order := parameters.Order
+	secret := p.conf.Merchant.Secret
 
 	encryptor := NewEncryptor(secret, parametersBase64, order)
 	signature, err := encryptor.CreateSignature()
 	if err != nil {
-		p.logger.Error("create signature", err)
-		return err
+		return nil, fmt.Errorf("create signature: %v", err)
 	}
 
 	request := &models.PaymentRequest{
@@ -172,9 +220,21 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		SignatureVersion: "HMAC_SHA256_V1",
 	}
 
-	go p.processRequest(request)
+	return request, nil
+}
 
-	return nil
+func (p *Payments) getTransaction(transactionId int) (*models.Transaction, error) {
+	if p.database == nil {
+		return nil, fmt.Errorf("database not set")
+	}
+	transaction, err := p.database.GetTransaction(transactionId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transaction %v", transactionId)
+	}
+	if !transaction.IsFinished {
+		return nil, fmt.Errorf("transaction %v is not finished", transactionId)
+	}
+	return transaction, nil
 }
 
 func (p *Payments) createParameters(parameters *models.MerchantParameters) (string, error) {

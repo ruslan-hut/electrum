@@ -12,6 +12,7 @@ import (
 
 const (
 	payTransaction = "/pay/:transaction_id"
+	returnPayment  = "/return/:transaction_id"
 )
 
 type Server struct {
@@ -39,6 +40,7 @@ func NewServer(conf *config.Config) *Server {
 
 func (s *Server) Register(router *httprouter.Router) {
 	router.GET(payTransaction, s.payTransaction)
+	router.GET(returnPayment, s.returnTransaction)
 }
 
 func (s *Server) SetPaymentsService(payments services.Payments) {
@@ -88,6 +90,30 @@ func (s *Server) payTransaction(w http.ResponseWriter, _ *http.Request, ps httpr
 	err = s.payments.PayTransaction(id)
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("pay transaction %v", id), err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) returnTransaction(w http.ResponseWriter, _ *http.Request, ps httprouter.Params) {
+	transactionId := ps.ByName("transaction_id")
+	if transactionId == "" {
+		s.logger.Warn("empty transaction id")
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	id, err := strconv.Atoi(transactionId)
+	if err != nil {
+		s.logger.Warn(fmt.Sprintf("invalid transaction id: %s; %v", transactionId, err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	err = s.payments.ReturnPayment(id)
+	if err != nil {
+		s.logger.Error(fmt.Sprintf("return transaction %v", id), err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
