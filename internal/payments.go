@@ -53,6 +53,7 @@ func (p *Payments) SetLogger(logger services.LogHandler) {
 func (p *Payments) PayTransaction(transactionId int) error {
 	p.Lock()
 	defer p.Unlock()
+	p.logger.Info(fmt.Sprintf("pay transaction %v", transactionId))
 
 	if p.conf.Merchant.Secret == "" || p.conf.Merchant.Code == "" || p.conf.Merchant.Terminal == "" {
 		return fmt.Errorf("merchant not configured")
@@ -258,6 +259,7 @@ func (p *Payments) processRequest(request *models.PaymentRequest) {
 	if !p.conf.Merchant.Test {
 		apiUrl = prodUrl
 	}
+	p.logger.Info(fmt.Sprintf("sending request to: %s", apiUrl))
 	response, err := http.Post(apiUrl, "application/json", bytes.NewBuffer(requestData))
 	if err != nil {
 		p.logger.Error("post request", err)
