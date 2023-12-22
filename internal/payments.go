@@ -151,7 +151,16 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		return err
 	}
 
-	go p.processRequest(request)
+	//go p.processRequest(request)
+
+	//---------------------------------------------
+	p.logger.Info(fmt.Sprintf("parameters: %s", request.Parameters))
+	transaction.PaymentBilled = transaction.PaymentAmount
+	err = p.database.UpdateTransaction(transaction)
+	if err != nil {
+		p.logger.Error("update transaction", err)
+	}
+	//---------------------------------------------
 
 	return nil
 }
