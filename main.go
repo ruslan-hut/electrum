@@ -5,6 +5,7 @@ import (
 	"electrum/internal"
 	"electrum/services"
 	"flag"
+	"fmt"
 )
 
 func main() {
@@ -20,6 +21,8 @@ func main() {
 		logger.Error("boot", err)
 		return
 	}
+
+	logger.Info(fmt.Sprintf("merchant: %s; terminal: %s; request url: %s", conf.Merchant.Code, conf.Merchant.Terminal, conf.Merchant.RequestUrl))
 
 	var mongo services.Database
 	if conf.Mongo.Enabled {

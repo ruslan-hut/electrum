@@ -15,22 +15,19 @@ import (
 	"time"
 )
 
-const (
-	testUrl = "https://sis-t.redsys.es:25443/sis/rest/trataPeticionREST"
-	prodUrl = "https://sis.redsys.es/sis/rest/trataPeticionREST"
-)
-
 type Payments struct {
-	conf     *config.Config
-	database services.Database
-	logger   services.LogHandler
-	mutex    *sync.Mutex
+	conf       *config.Config
+	database   services.Database
+	logger     services.LogHandler
+	mutex      *sync.Mutex
+	requestUrl string
 }
 
 func NewPayments(config *config.Config) *Payments {
 	return &Payments{
-		conf:  config,
-		mutex: &sync.Mutex{},
+		conf:       config,
+		requestUrl: config.Merchant.RequestUrl,
+		mutex:      &sync.Mutex{},
 	}
 }
 
@@ -255,12 +252,7 @@ func (p *Payments) processRequest(request *models.PaymentRequest) {
 		return
 	}
 
-	apiUrl := testUrl
-	if !p.conf.Merchant.Test {
-		apiUrl = prodUrl
-	}
-	p.logger.Info(fmt.Sprintf("sending request to: %s", apiUrl))
-	response, err := http.Post(apiUrl, "application/json", bytes.NewBuffer(requestData))
+	response, err := http.Post(p.requestUrl, "application/json", bytes.NewBuffer(requestData))
 	if err != nil {
 		p.logger.Error("post request", err)
 		return

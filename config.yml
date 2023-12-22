@@ -21,4 +21,4 @@ merchant:
   secret: 123456789012345678901234
   code: 1234567890
   terminal: 123
-  test: true
+  request_url: https://test.bank.com/v1/checkouts
