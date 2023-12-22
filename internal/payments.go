@@ -291,6 +291,7 @@ func (p *Payments) readResponse(response *http.Response) (*models.PaymentParamet
 	var paymentResult models.PaymentParameters
 	err = json.Unmarshal(parameters, &paymentResult)
 	if err != nil {
+		p.logger.Warn(fmt.Sprintf("parameters: %s", string(parameters)))
 		return nil, fmt.Errorf("parse parameters: %v", err)
 	}
 
