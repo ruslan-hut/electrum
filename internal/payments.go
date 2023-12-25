@@ -380,7 +380,8 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 		}
 	}
 
-	if paymentResult.Response != "0000" {
+	err = p.checkPaymentResult(paymentResult)
+	if err != nil {
 		p.updatePaymentMethodFailCounter(order.Identifier, 1)
 		p.logger.Warn(fmt.Sprintf("error %s; transaction %v; order %s; amount %s", paymentResult.Response, order.TransactionId, paymentResult.Order, paymentResult.Amount))
 		return
@@ -426,6 +427,22 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 
 	}
 
+}
+
+func (p *Payments) checkPaymentResult(result *models.PaymentParameters) error {
+	if result.TransactionType == "0" {
+		if result.Response != "0000" {
+			return fmt.Errorf("code %s", result.Response)
+		}
+		return nil
+	}
+	if result.TransactionType == "3" {
+		if result.Response != "0900" {
+			return fmt.Errorf("code %s", result.Response)
+		}
+		return nil
+	}
+	return fmt.Errorf("transaction type %s; code %s", result.TransactionType, result.Response)
 }
 
 func (p *Payments) updatePaymentMethodFailCounter(identifier string, count int) {
