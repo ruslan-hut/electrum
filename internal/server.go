@@ -2,9 +2,12 @@ package internal
 
 import (
 	"electrum/config"
+	"electrum/models"
 	"electrum/services"
+	"encoding/json"
 	"fmt"
 	"github.com/julienschmidt/httprouter"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
@@ -13,6 +16,7 @@ import (
 const (
 	payTransaction = "/pay/:transaction_id"
 	returnPayment  = "/return/:transaction_id"
+	returnByOrder  = "/return/order/:order_id"
 )
 
 type Server struct {
@@ -41,6 +45,7 @@ func NewServer(conf *config.Config) *Server {
 func (s *Server) Register(router *httprouter.Router) {
 	router.GET(payTransaction, s.payTransaction)
 	router.GET(returnPayment, s.returnTransaction)
+	router.POST(returnByOrder, s.returnOrder)
 }
 
 func (s *Server) SetPaymentsService(payments services.Payments) {
@@ -90,6 +95,39 @@ func (s *Server) payTransaction(w http.ResponseWriter, _ *http.Request, ps httpr
 	err = s.payments.PayTransaction(id)
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("pay transaction %v", id), err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) returnOrder(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	orderId := ps.ByName("order_id")
+	if orderId == "" {
+		s.logger.Warn("return order: empty order id")
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.logger.Error("return order: read request body", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	var order models.PaymentOrder
+	err = json.Unmarshal(body, &order)
+	if err != nil {
+		s.logger.Error("return order: decode request body", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	s.logger.Info(fmt.Sprintf("processing request: return order %s, amount %d", orderId, order.Amount))
+	err = s.payments.ReturnByOrder(orderId, order.Amount)
+	if err != nil {
+		s.logger.Error(fmt.Sprintf("return order %s", orderId), err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

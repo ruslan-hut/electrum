@@ -206,6 +206,45 @@ func (p *Payments) ReturnPayment(transactionId int) error {
 	return nil
 }
 
+func (p *Payments) ReturnByOrder(orderId string, amount int) error {
+	p.Lock()
+	defer p.Unlock()
+
+	if p.database == nil {
+		return fmt.Errorf("database not set")
+	}
+	id, err := strconv.Atoi(orderId)
+	if err != nil {
+		return fmt.Errorf("invalid order id: %s; %v", orderId, err)
+	}
+	order, err := p.database.GetPaymentOrder(id)
+	if err != nil {
+		return fmt.Errorf("get payment order: %v", err)
+	}
+	if order.Amount > amount {
+		return fmt.Errorf("order amount %v is greater than return amount %v", order.Amount, amount)
+	}
+
+	parameters := models.MerchantParameters{
+		Amount:          fmt.Sprintf("%d", amount),
+		Order:           orderId,
+		MerchantCode:    p.conf.Merchant.Code,
+		Currency:        "978",
+		TransactionType: "3",
+		Terminal:        p.conf.Merchant.Terminal,
+	}
+
+	request, err := p.newRequest(&parameters)
+	if err != nil {
+		p.logger.Error("return by order: create request", err)
+		return err
+	}
+
+	go p.processRequest(request)
+
+	return nil
+}
+
 func (p *Payments) newRequest(parameters *models.MerchantParameters) (*models.PaymentRequest, error) {
 	// encode parameters to Base64
 	parametersBase64, err := p.createParameters(parameters)
@@ -344,9 +383,9 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 		return
 	}
 	p.updatePaymentMethodFailCounter(order.Identifier, 0)
-	p.logger.Info(fmt.Sprintf("transaction %v; order %s accepted; amount %s", order.TransactionId, paymentResult.Order, paymentResult.Amount))
 
 	if order.TransactionId > 0 {
+		p.logger.Info(fmt.Sprintf("transaction %v; order %s accepted; amount %s", order.TransactionId, paymentResult.Order, paymentResult.Amount))
 
 		transaction, err := p.database.GetTransaction(order.TransactionId)
 		if err != nil {
@@ -364,7 +403,8 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 			}
 		}
 
-		//} else {
+	} else {
+		p.logger.Info(fmt.Sprintf("type %s; order %s accepted; amount %s", paymentResult.TransactionType, paymentResult.Order, paymentResult.Amount))
 		//
 		//	paymentMethod := models.PaymentMethod{
 		//		Description: "**** **** **** ****",
