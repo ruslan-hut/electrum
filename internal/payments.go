@@ -210,6 +210,9 @@ func (p *Payments) ReturnByOrder(orderId string, amount int) error {
 	p.Lock()
 	defer p.Unlock()
 
+	if amount == 0 {
+		return fmt.Errorf("amount to return is zero")
+	}
 	if p.database == nil {
 		return fmt.Errorf("database not set")
 	}
@@ -221,8 +224,8 @@ func (p *Payments) ReturnByOrder(orderId string, amount int) error {
 	if err != nil {
 		return fmt.Errorf("get payment order: %v", err)
 	}
-	if order.Amount > amount {
-		return fmt.Errorf("order amount %v is greater than return amount %v", order.Amount, amount)
+	if order.Amount < amount {
+		return fmt.Errorf("order amount %v is less than return amount %v", order.Amount, amount)
 	}
 
 	parameters := models.MerchantParameters{
