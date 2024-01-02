@@ -175,16 +175,16 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		return err
 	}
 
-	//go p.processRequest(request)
+	go p.processRequest(request)
 
 	//---------------------------------------------
-	p.logger.Info(fmt.Sprintf("parameters: %s", request.Parameters[0:20]))
-	transaction.PaymentBilled = transaction.PaymentAmount
-	transaction.PaymentOrder = paymentOrder.Order
-	err = p.database.UpdateTransaction(transaction)
-	if err != nil {
-		p.logger.Error("update transaction", err)
-	}
+	//p.logger.Info(fmt.Sprintf("parameters: %s", request.Parameters[0:20]))
+	//transaction.PaymentBilled = transaction.PaymentAmount
+	//transaction.PaymentOrder = paymentOrder.Order
+	//err = p.database.UpdateTransaction(transaction)
+	//if err != nil {
+	//	p.logger.Error("update transaction", err)
+	//}
 	//---------------------------------------------
 
 	return nil
@@ -415,6 +415,23 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 	if err != nil {
 		p.updatePaymentMethodFailCounter(order.Identifier, 1)
 		p.logger.Warn(fmt.Sprintf("error %s", err))
+
+		// close transaction on payment error; temporary solution
+		if order.TransactionId > 0 {
+			p.logger.Info(fmt.Sprintf("close transaction %v on payment error", order.TransactionId))
+			transaction, err := p.database.GetTransaction(order.TransactionId)
+			if err != nil {
+				p.logger.Error("get transaction", err)
+				return
+			}
+			transaction.PaymentBilled = transaction.PaymentAmount
+			transaction.PaymentOrder = order.Order
+			err = p.database.UpdateTransaction(transaction)
+			if err != nil {
+				p.logger.Error("update transaction", err)
+			}
+		}
+
 		return
 	}
 	p.updatePaymentMethodFailCounter(order.Identifier, 0)
