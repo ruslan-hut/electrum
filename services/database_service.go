@@ -11,6 +11,7 @@ type Database interface {
 	UpdateTransaction(transaction *models.Transaction) error
 
 	GetPaymentMethod(userId string) (*models.PaymentMethod, error)
+	SavePaymentMethod(paymentMethod *models.PaymentMethod) error
 	GetPaymentMethodByIdentifier(identifier string) (*models.PaymentMethod, error)
 	UpdatePaymentMethodFailCount(identifier string, count int) error
 

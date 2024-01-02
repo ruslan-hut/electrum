@@ -17,6 +17,7 @@ const (
 	payTransaction = "/pay/:transaction_id"
 	returnPayment  = "/return/:transaction_id"
 	returnByOrder  = "/return/order/:order_id"
+	paymentNotify  = "/notify"
 )
 
 type Server struct {
@@ -46,6 +47,7 @@ func (s *Server) Register(router *httprouter.Router) {
 	router.GET(payTransaction, s.payTransaction)
 	router.GET(returnPayment, s.returnTransaction)
 	router.POST(returnByOrder, s.returnOrder)
+	router.POST(paymentNotify, s.paymentNotify)
 }
 
 func (s *Server) SetPaymentsService(payments services.Payments) {
@@ -156,5 +158,21 @@ func (s *Server) returnTransaction(w http.ResponseWriter, _ *http.Request, ps ht
 		return
 	}
 
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) paymentNotify(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.logger.Error("payment notify: get body", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	err = s.payments.Notify(body)
+	if err != nil {
+		s.logger.Error("payment notify: process body", err)
+	}
 	w.WriteHeader(http.StatusOK)
 }

@@ -226,15 +226,7 @@ func (m *MongoDB) SavePaymentResult(paymentParameters *models.PaymentParameters)
 	defer m.disconnect(connection)
 
 	collection := connection.Database(m.database).Collection(collectionPayment)
-	filter := bson.M{"order": paymentParameters.Order}
-	update := bson.M{
-		"$set": paymentParameters, // This will set the fields of the document to the values in paymentParameters
-	}
-	option := options.Update().SetUpsert(true) // If no document is found, create a new one.
-	_, err = collection.UpdateOne(m.ctx, filter, update, option)
-	if err != nil {
-		return err
-	}
+	_, err = collection.InsertOne(m.ctx, paymentParameters)
 	return nil
 }
 
@@ -271,6 +263,42 @@ func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
 		}},
 	}
 	if _, err = collection.UpdateOne(m.ctx, filter, update); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *MongoDB) GetPaymentMethodById(identifier, userId string) (*models.PaymentMethod, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
+	filter := bson.D{{"identifier", identifier}, {"user_id", userId}}
+	var paymentMethod models.PaymentMethod
+	if err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod); err != nil {
+		return nil, err
+	}
+	return &paymentMethod, nil
+}
+
+func (m *MongoDB) SavePaymentMethod(paymentMethod *models.PaymentMethod) error {
+	saved, _ := m.GetPaymentMethodById(paymentMethod.Identifier, paymentMethod.UserId)
+	if saved != nil {
+		return fmt.Errorf("payment method with identifier %s... already exists", paymentMethod.Identifier[0:10])
+	}
+
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
+	_, err = collection.InsertOne(m.ctx, paymentMethod)
+	if err != nil {
 		return err
 	}
 	return nil

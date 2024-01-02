@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
@@ -45,6 +46,29 @@ func (p *Payments) SetDatabase(database services.Database) {
 
 func (p *Payments) SetLogger(logger services.LogHandler) {
 	p.logger = logger
+}
+
+func (p *Payments) Notify(data []byte) error {
+	p.Lock()
+	defer p.Unlock()
+
+	params, err := url.ParseQuery(string(data))
+	if err != nil {
+		p.logger.Info(string(data))
+		return fmt.Errorf("parse query: %v", err)
+	}
+
+	paymentResult := models.PaymentResult{
+		SignatureVersion: params.Get("Ds_SignatureVersion"),
+		Parameters:       params.Get("Ds_MerchantParameters"),
+		Signature:        params.Get("Ds_Signature"),
+	}
+
+	response, err := p.readParameters(paymentResult.Parameters)
+	if response != nil {
+		go p.processResponse(response)
+	}
+	return err
 }
 
 func (p *Payments) PayTransaction(transactionId int) error {
@@ -309,7 +333,12 @@ func (p *Payments) processRequest(request *models.PaymentRequest) {
 		p.logger.Error("post request", err)
 		return
 	}
-	paymentResult, err := p.readResponse(response)
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		p.logger.Error("read response body", err)
+		return
+	}
+	paymentResult, err := p.readResponse(body)
 	if err != nil {
 		p.logger.Error("read response", err)
 		return
@@ -319,33 +348,35 @@ func (p *Payments) processRequest(request *models.PaymentRequest) {
 
 }
 
-func (p *Payments) readResponse(response *http.Response) (*models.PaymentParameters, error) {
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response body: %v", err)
-	}
+func (p *Payments) readResponse(body []byte) (*models.PaymentParameters, error) {
 	var paymentResponse models.PaymentRequest
-	err = json.Unmarshal(body, &paymentResponse)
+	err := json.Unmarshal(body, &paymentResponse)
 	if err != nil {
 		return nil, fmt.Errorf("parse response: %v", err)
 	}
+	return p.readParameters(paymentResponse.Parameters)
+}
 
-	parameters, err := base64.StdEncoding.DecodeString(paymentResponse.Parameters)
+func (p *Payments) readParameters(parameters string) (*models.PaymentParameters, error) {
+	if parameters == "" {
+		return nil, fmt.Errorf("empty parameters")
+	}
+	parametersBytes, err := base64.StdEncoding.DecodeString(parameters)
 	if err != nil {
 		return nil, fmt.Errorf("decode parameters: %v", err)
 	}
 	var paymentResult models.PaymentParameters
-	err = json.Unmarshal(parameters, &paymentResult)
+	err = json.Unmarshal(parametersBytes, &paymentResult)
 	if err != nil {
-		p.logger.Warn(fmt.Sprintf("parameters: %s", string(parameters)))
+		p.logger.Warn(fmt.Sprintf("parameters: %s", string(parametersBytes)))
 		return nil, fmt.Errorf("parse parameters: %v", err)
 	}
-
 	return &paymentResult, nil
 }
 
 func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 
+	p.logger.Info(fmt.Sprintf("response: type: %s; result: %s; order: %s; amount: %s", paymentResult.TransactionType, paymentResult.Response, paymentResult.Order, paymentResult.Amount))
 	err := p.database.SavePaymentResult(paymentResult)
 	if err != nil {
 		p.logger.Error("save payment result", err)
@@ -383,13 +414,23 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 	err = p.checkPaymentResult(paymentResult)
 	if err != nil {
 		p.updatePaymentMethodFailCounter(order.Identifier, 1)
-		p.logger.Warn(fmt.Sprintf("error %s; transaction %v; order %s; amount %s", paymentResult.Response, order.TransactionId, paymentResult.Order, paymentResult.Amount))
+		p.logger.Warn(fmt.Sprintf("error %s", err))
 		return
 	}
 	p.updatePaymentMethodFailCounter(order.Identifier, 0)
 
+	// if transaction type is 3, then it is a refund
+	if paymentResult.TransactionType == "3" {
+		order.RefundAmount = amount
+		order.RefundTime = time.Now()
+		err = p.database.SavePaymentOrder(order)
+		if err != nil {
+			p.logger.Error("save payment order", err)
+		}
+		return
+	}
+
 	if order.TransactionId > 0 {
-		p.logger.Info(fmt.Sprintf("transaction %v; order %s accepted; amount %s", order.TransactionId, paymentResult.Order, paymentResult.Amount))
 
 		transaction, err := p.database.GetTransaction(order.TransactionId)
 		if err != nil {
@@ -408,22 +449,29 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 		}
 
 	} else {
-		p.logger.Info(fmt.Sprintf("type %s; order %s accepted; amount %s", paymentResult.TransactionType, paymentResult.Order, paymentResult.Amount))
-		//
-		//	paymentMethod := models.PaymentMethod{
-		//		Description: "**** **** **** ****",
-		//		Identifier:  params.MerchantIdentifier,
-		//		CardBrand:   params.CardBrand,
-		//		CardCountry: params.CardCountry,
-		//		ExpiryDate:  params.ExpiryDate,
-		//		UserId:      order.UserId,
-		//		UserName:    order.UserName,
-		//	}
-		//	err = p.database.SavePaymentMethod(&paymentMethod)
-		//	if err != nil {
-		//		p.logger.Error("save payment method", err)
-		//		return
-		//	}
+
+		if order.UserId == "" {
+			p.logger.Warn(fmt.Sprintf("method not saved: empty user id for order %v", order.Order))
+			return
+		}
+		if paymentResult.MerchantIdentifier == "" {
+			p.logger.Warn(fmt.Sprintf("method not saved: empty identifier for order %v", order.Order))
+			return
+		}
+		paymentMethod := models.PaymentMethod{
+			Description: "**** **** **** ****",
+			Identifier:  paymentResult.MerchantIdentifier,
+			CardBrand:   paymentResult.CardBrand,
+			CardCountry: paymentResult.CardCountry,
+			ExpiryDate:  paymentResult.ExpiryDate,
+			UserId:      order.UserId,
+			UserName:    order.UserName,
+		}
+		err = p.database.SavePaymentMethod(&paymentMethod)
+		if err != nil {
+			p.logger.Error("save payment method", err)
+			return
+		}
 
 	}
 
@@ -442,7 +490,7 @@ func (p *Payments) checkPaymentResult(result *models.PaymentParameters) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("transaction type %s; code %s", result.TransactionType, result.Response)
+	return fmt.Errorf("code %s; transaction type %s", result.Response, result.TransactionType)
 }
 
 func (p *Payments) updatePaymentMethodFailCounter(identifier string, count int) {
