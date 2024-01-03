@@ -169,6 +169,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		Cof:             "N",
 		Tid:             paymentMethod.Tid,
 	}
+	p.logger.Info(fmt.Sprintf("ORDER: %s; DS_MERCHANT_IDENTIFIER: %s***; DS_MERCHANT_COF_TXNID: %s***", order, parameters.Identifier[0:8], parameters.Tid[0:5]))
 
 	request, err := p.newRequest(&parameters)
 	if err != nil {
