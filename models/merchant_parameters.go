@@ -11,4 +11,5 @@ type MerchantParameters struct {
 	DirectPayment   string `json:"DS_MERCHANT_DIRECTPAYMENT"`
 	Exception       string `json:"DS_MERCHANT_EXCEP_SCA"`
 	Cof             string `json:"DS_MERCHANT_COF_TYPE"`
+	Tid             string `json:"DS_MERCHANT_COF_TXNID"`
 }

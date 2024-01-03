@@ -159,7 +159,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	parameters := models.MerchantParameters{
 		Amount:          fmt.Sprintf("%d", amount),
 		Order:           order,
-		Identifier:      paymentOrder.Identifier,
+		Identifier:      paymentMethod.Identifier,
 		MerchantCode:    p.conf.Merchant.Code,
 		Currency:        "978",
 		TransactionType: "0",
@@ -167,6 +167,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		DirectPayment:   "true",
 		Exception:       "MIT",
 		Cof:             "N",
+		Tid:             paymentMethod.Tid,
 	}
 
 	request, err := p.newRequest(&parameters)
@@ -478,6 +479,7 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 		paymentMethod := models.PaymentMethod{
 			Description: "**** **** **** ****",
 			Identifier:  paymentResult.MerchantIdentifier,
+			Tid:         paymentResult.MerchantCofTxnid,
 			CardBrand:   paymentResult.CardBrand,
 			CardCountry: paymentResult.CardCountry,
 			ExpiryDate:  paymentResult.ExpiryDate,
