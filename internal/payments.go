@@ -319,6 +319,7 @@ func (p *Payments) createParameters(parameters *models.MerchantParameters) (stri
 	if err != nil {
 		return "", err
 	}
+	p.logger.Debug(fmt.Sprintf("request parameters: %s", string(parametersJson)))
 	// encode parameters to Base64
 	return base64.StdEncoding.EncodeToString(parametersJson), nil
 }
@@ -373,6 +374,7 @@ func (p *Payments) readParameters(parameters string) (*models.PaymentParameters,
 		p.logger.Warn(fmt.Sprintf("parameters: %s", string(parametersBytes)))
 		return nil, fmt.Errorf("parse parameters: %v", err)
 	}
+	p.logger.Debug(fmt.Sprintf("received parameters: %s", string(parametersBytes)))
 	return &paymentResult, nil
 }
 
@@ -416,7 +418,6 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 	err = p.checkPaymentResult(paymentResult)
 	if err != nil {
 		p.updatePaymentMethodFailCounter(order.Identifier, 1)
-		p.logger.Warn(fmt.Sprintf("error %s", err))
 
 		// close transaction on payment error; temporary solution
 		if order.TransactionId > 0 {
