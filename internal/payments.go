@@ -341,8 +341,7 @@ func (p *Payments) processRequest(request *models.PaymentRequest) {
 	}
 	paymentResult, err := p.readResponse(body)
 	if err != nil {
-		p.logger.Error("read response", err)
-		p.logger.Info(fmt.Sprintf("response: %s", string(body)))
+		p.logger.Warn(fmt.Sprintf("response: %s", string(body)))
 		return
 	}
 
