@@ -58,7 +58,7 @@ func (p *Payments) Notify(data []byte) error {
 		return fmt.Errorf("parse query: %v", err)
 	}
 
-	paymentResult := models.PaymentResult{
+	paymentResult := models.PaymentRequest{
 		SignatureVersion: params.Get("Ds_SignatureVersion"),
 		Parameters:       params.Get("Ds_MerchantParameters"),
 		Signature:        params.Get("Ds_Signature"),
@@ -166,10 +166,11 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		Terminal:        p.conf.Merchant.Terminal,
 		DirectPayment:   "true",
 		Exception:       "MIT",
-		Cof:             "N",
-		Tid:             paymentMethod.Tid,
+		CofIni:          "N",
+		CofType:         "C",
+		CofTid:          paymentMethod.CofTid,
 	}
-	p.logger.Info(fmt.Sprintf("ORDER: %s; DS_MERCHANT_IDENTIFIER: %s***; DS_MERCHANT_COF_TXNID: %s***", order, parameters.Identifier[0:8], parameters.Tid[0:5]))
+	p.logger.Info(fmt.Sprintf("ORDER: %s; DS_MERCHANT_IDENTIFIER: %s***; DS_MERCHANT_COF_TXNID: %s***", order, parameters.Identifier[0:8], parameters.CofTid[0:5]))
 
 	request, err := p.newRequest(&parameters)
 	if err != nil {
@@ -481,7 +482,7 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 		paymentMethod := models.PaymentMethod{
 			Description: "**** **** **** ****",
 			Identifier:  paymentResult.MerchantIdentifier,
-			Tid:         paymentResult.MerchantCofTxnid,
+			CofTid:      paymentResult.MerchantCofTxnid,
 			CardBrand:   paymentResult.CardBrand,
 			CardCountry: paymentResult.CardCountry,
 			ExpiryDate:  paymentResult.ExpiryDate,

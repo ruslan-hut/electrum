@@ -12,5 +12,5 @@ type PaymentMethod struct {
 	UserId      string `json:"user_id" bson:"user_id"`
 	UserName    string `json:"user_name" bson:"user_name"`
 	FailCount   int    `json:"fail_count" bson:"fail_count"`
-	Tid         string `json:"merchant_cof_txnid" bson:"merchant_cof_txnid"`
+	CofTid      string `json:"merchant_cof_txnid" bson:"merchant_cof_txnid"`
 }
