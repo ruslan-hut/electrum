@@ -499,11 +499,13 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 		p.logger.Info(fmt.Sprintf("payment method %s saved for %s", paymentMethod.Identifier[0:10], order.UserName))
 
 		//after saving payment method, need to refund the amount
-		id := fmt.Sprintf("%d", order.Order)
-		err = p.ReturnByOrder(id, order.Amount)
-		if err != nil {
-			p.logger.Error("refund payment", err)
-			return
+		if order.Amount > 0 {
+			id := fmt.Sprintf("%d", order.Order)
+			err = p.ReturnByOrder(id, order.Amount)
+			if err != nil {
+				p.logger.Error("refund payment", err)
+				return
+			}
 		}
 
 	}
