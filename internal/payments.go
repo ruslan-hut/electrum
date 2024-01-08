@@ -473,14 +473,6 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 
 	} else {
 
-		if order.UserId == "" {
-			p.logger.Warn(fmt.Sprintf("method not saved: empty user id for order %v", order.Order))
-			return
-		}
-		if paymentResult.MerchantIdentifier == "" {
-			p.logger.Warn(fmt.Sprintf("method not saved: empty identifier for order %v", order.Order))
-			return
-		}
 		paymentMethod := models.PaymentMethod{
 			Description: "**** **** **** ****",
 			Identifier:  paymentResult.MerchantIdentifier,
@@ -491,12 +483,12 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 			UserId:      order.UserId,
 			UserName:    order.UserName,
 		}
-		err = p.database.SavePaymentMethod(&paymentMethod)
+		err = p.savePaymentMethod(&paymentMethod)
 		if err != nil {
 			p.logger.Error("save payment method", err)
-			return
+		} else {
+			p.logger.Info(fmt.Sprintf("payment method %s saved for %s", paymentMethod.Identifier[0:10], order.UserName))
 		}
-		p.logger.Info(fmt.Sprintf("payment method %s saved for %s", paymentMethod.Identifier[0:10], order.UserName))
 
 		//after saving payment method, need to refund the amount
 		if order.Amount > 0 {
@@ -510,6 +502,16 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 
 	}
 
+}
+
+func (p *Payments) savePaymentMethod(pm *models.PaymentMethod) error {
+	if pm.UserId == "" {
+		return fmt.Errorf("empty user id")
+	}
+	if pm.Identifier == "" {
+		return fmt.Errorf("empty identifier")
+	}
+	return p.database.SavePaymentMethod(pm)
 }
 
 func (p *Payments) checkPaymentResult(result *models.PaymentParameters) error {
