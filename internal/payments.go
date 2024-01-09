@@ -132,15 +132,15 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	}
 
 	//---------------------------------------------
-	//if p.conf.IsDebug {
-	//	transaction.PaymentBilled = transaction.PaymentAmount
-	//	err = p.database.UpdateTransaction(transaction)
-	//	if err != nil {
-	//		p.logger.Error("update transaction", err)
-	//	}
-	//	p.logger.Info(fmt.Sprintf("transaction %v paid in debug mode", transactionId))
-	//	return nil
-	//}
+	if p.conf.DisablePayment {
+		transaction.PaymentBilled = transaction.PaymentAmount
+		err = p.database.UpdateTransaction(transaction)
+		if err != nil {
+			p.logger.Error("update transaction", err)
+		}
+		p.logger.Info(fmt.Sprintf("payment disabled: transaction %v paid without request", transactionId))
+		return nil
+	}
 	//---------------------------------------------
 
 	paymentOrder := models.PaymentOrder{

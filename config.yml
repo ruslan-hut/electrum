@@ -1,6 +1,7 @@
 ---
 
 is_debug: true
+disable_payment: true
 log_records: 1000
 firebase_key: c:/cert/firebase.json
 listen:
