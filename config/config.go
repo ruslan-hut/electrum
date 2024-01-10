@@ -8,7 +8,7 @@ import (
 
 type Config struct {
 	IsDebug        bool   `yaml:"is_debug" env-default:"false"`
-	DisablePayment bool   `yaml:"disable_payment" env-default:"true"`
+	DisablePayment bool   `yaml:"disable_payment" env-default:"false"`
 	LogRecords     int64  `yaml:"log_records" env-default:"0"`
 	FirebaseKey    string `yaml:"firebase_key" env-default:""`
 	Listen         struct {
