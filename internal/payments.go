@@ -465,15 +465,14 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 			p.logger.Error("get transaction", err)
 			return
 		}
-		if transaction.PaymentOrder == 0 {
-			transaction.PaymentOrder = order.Order
-			transaction.PaymentBilled = order.Amount
 
-			err = p.database.UpdateTransaction(transaction)
-			if err != nil {
-				p.logger.Error("update transaction", err)
-				return
-			}
+		transaction.PaymentOrder = order.Order
+		transaction.PaymentBilled = order.Amount
+
+		err = p.database.UpdateTransaction(transaction)
+		if err != nil {
+			p.logger.Error("update transaction", err)
+			return
 		}
 
 	} else {
