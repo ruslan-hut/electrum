@@ -46,6 +46,11 @@ func (p *Payments) SetDatabase(database services.Database) {
 
 func (p *Payments) SetLogger(logger services.LogHandler) {
 	p.logger = logger
+	if p.conf.DisablePayment {
+		p.logger.Warn("service disabled")
+	} else {
+		p.logger.Info("service enabled")
+	}
 }
 
 func (p *Payments) Notify(data []byte) error {

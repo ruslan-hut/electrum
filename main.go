@@ -22,12 +22,6 @@ func main() {
 		return
 	}
 
-	if conf.DisablePayment {
-		logger.Warn("payment disabled")
-	} else {
-		logger.Info("payment enabled")
-	}
-
 	logger.Info(fmt.Sprintf("merchant: %s; terminal: %s; request url: %s", conf.Merchant.Code, conf.Merchant.Terminal, conf.Merchant.RequestUrl))
 
 	var mongo services.Database
