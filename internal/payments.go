@@ -187,7 +187,15 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		CofType:         "C",
 		CofTid:          paymentMethod.CofTid,
 	}
-	p.logger.Info(fmt.Sprintf("ORDER: %s; DS_MERCHANT_IDENTIFIER: %s***; DS_MERCHANT_COF_TXNID: %s***", order, parameters.Identifier[0:8], parameters.CofTid[0:5]))
+	identifier := paymentMethod.Identifier
+	if len(identifier) > 8 {
+		identifier = identifier[0:8]
+	}
+	txnid := paymentMethod.CofTid
+	if len(txnid) > 5 {
+		txnid = txnid[0:5]
+	}
+	p.logger.Info(fmt.Sprintf("order: %s; identifier: %s***; txnid: %s***", order, identifier, txnid))
 
 	request, err := p.newRequest(&parameters)
 	if err != nil {
