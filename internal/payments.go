@@ -110,7 +110,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 			p.logger.Error("update transaction", err)
 		}
 
-		return fmt.Errorf("empty user id for tag %v", transaction.IdTag)
+		return fmt.Errorf("empty user id for tag %v", secret(transaction.IdTag))
 	}
 	paymentMethod, err := p.database.GetPaymentMethod(tag.UserId)
 	if err != nil {
@@ -122,7 +122,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 			p.logger.Error("update transaction", err)
 		}
 
-		return fmt.Errorf("id %v has no payment method", transaction.IdTag)
+		return fmt.Errorf("id %v has no payment method", secret(transaction.IdTag))
 	}
 	consumed := (transaction.MeterStop - transaction.MeterStart) / 1000
 	description := fmt.Sprintf("%s:%d %dkW", transaction.ChargePointId, transaction.ConnectorId, consumed)
@@ -187,7 +187,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		CofType:         "C",
 		CofTid:          paymentMethod.CofTid,
 	}
-	p.logger.Info(fmt.Sprintf("ORDER: %s; DS_MERCHANT_IDENTIFIER: %s***; DS_MERCHANT_COF_TXNID: %s***", order, parameters.Identifier[0:8], parameters.CofTid[0:5]))
+	p.logger.Info(fmt.Sprintf("order: %s; identifier: %s; txnid: %s", order, secret(parameters.Identifier), secret(parameters.CofTid)))
 
 	request, err := p.newRequest(&parameters)
 	if err != nil {
@@ -491,7 +491,7 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 		if err != nil {
 			p.logger.Error("save payment method", err)
 		} else {
-			p.logger.Info(fmt.Sprintf("payment method %s saved for %s", paymentMethod.Identifier[0:10], order.UserName))
+			p.logger.Info(fmt.Sprintf("payment method %s saved for %s", secret(paymentMethod.Identifier), order.UserName))
 		}
 
 		//after saving payment method, need to refund the amount
@@ -545,7 +545,7 @@ func (p *Payments) updatePaymentMethodFailCounter(identifier string, count int) 
 		return
 	}
 	if paymentMethod == nil {
-		p.logger.Warn(fmt.Sprintf("payment method %s not found", identifier))
+		p.logger.Warn(fmt.Sprintf("payment method %s not found", secret(identifier)))
 		return
 	}
 
@@ -558,4 +558,14 @@ func (p *Payments) updatePaymentMethodFailCounter(identifier string, count int) 
 	if err != nil {
 		p.logger.Error("update payment method", err)
 	}
+}
+
+func secret(some string) string {
+	if len(some) > 5 {
+		return fmt.Sprintf("%s***", some[0:5])
+	}
+	if some == "" {
+		return "?"
+	}
+	return "***"
 }
