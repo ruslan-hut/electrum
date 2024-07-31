@@ -1,25 +1,25 @@
 package services
 
-import "electrum/models"
+import "electrum/entity"
 
 type Database interface {
 	WriteLogMessage(data Data) error
 
-	GetUserTag(idTag string) (*models.UserTag, error)
+	GetUserTag(idTag string) (*entity.UserTag, error)
 
-	GetTransaction(id int) (*models.Transaction, error)
-	UpdateTransaction(transaction *models.Transaction) error
+	GetTransaction(id int) (*entity.Transaction, error)
+	UpdateTransaction(transaction *entity.Transaction) error
 
-	GetPaymentMethod(userId string) (*models.PaymentMethod, error)
-	SavePaymentMethod(paymentMethod *models.PaymentMethod) error
-	GetPaymentMethodByIdentifier(identifier string) (*models.PaymentMethod, error)
+	GetPaymentMethod(userId string) (*entity.PaymentMethod, error)
+	SavePaymentMethod(paymentMethod *entity.PaymentMethod) error
+	GetPaymentMethodByIdentifier(identifier string) (*entity.PaymentMethod, error)
 	UpdatePaymentMethodFailCount(identifier string, count int) error
 
-	GetPaymentOrderByTransaction(transactionId int) (*models.PaymentOrder, error)
-	SavePaymentOrder(order *models.PaymentOrder) error
-	GetPaymentOrder(id int) (*models.PaymentOrder, error)
-	GetLastOrder() (*models.PaymentOrder, error)
-	SavePaymentResult(paymentParameters *models.PaymentParameters) error
+	GetPaymentOrderByTransaction(transactionId int) (*entity.PaymentOrder, error)
+	SavePaymentOrder(order *entity.PaymentOrder) error
+	GetPaymentOrder(id int) (*entity.PaymentOrder, error)
+	GetLastOrder() (*entity.PaymentOrder, error)
+	SavePaymentResult(paymentParameters *entity.PaymentParameters) error
 }
 
 type Data interface {

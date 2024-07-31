@@ -3,7 +3,7 @@ package internal
 import (
 	"bytes"
 	"electrum/config"
-	"electrum/models"
+	"electrum/entity"
 	"electrum/services"
 	"encoding/base64"
 	"encoding/json"
@@ -63,7 +63,7 @@ func (p *Payments) Notify(data []byte) error {
 		return fmt.Errorf("parse query: %v", err)
 	}
 
-	paymentResult := models.PaymentRequest{
+	paymentResult := entity.PaymentRequest{
 		SignatureVersion: params.Get("Ds_SignatureVersion"),
 		Parameters:       params.Get("Ds_MerchantParameters"),
 		Signature:        params.Get("Ds_Signature"),
@@ -158,7 +158,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	}
 	//---------------------------------------------
 
-	paymentOrder := models.PaymentOrder{
+	paymentOrder := entity.PaymentOrder{
 		Amount:        amount,
 		Description:   description,
 		Identifier:    paymentMethod.Identifier,
@@ -183,7 +183,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 
 	order := fmt.Sprintf("%d", paymentOrder.Order)
 
-	parameters := models.MerchantParameters{
+	parameters := entity.MerchantParameters{
 		Amount:          fmt.Sprintf("%d", amount),
 		Order:           order,
 		Identifier:      paymentMethod.Identifier,
@@ -226,7 +226,7 @@ func (p *Payments) ReturnPayment(transactionId int) error {
 	}
 	order := fmt.Sprintf("%d", transaction.PaymentOrder)
 
-	parameters := models.MerchantParameters{
+	parameters := entity.MerchantParameters{
 		Amount: fmt.Sprintf("%d", amount),
 		Order:  order,
 		//Identifier:      paymentOrder.Identifier,
@@ -272,7 +272,7 @@ func (p *Payments) ReturnByOrder(orderId string, amount int) error {
 		return fmt.Errorf("order amount %v is less than return amount %v", order.Amount, amount)
 	}
 
-	parameters := models.MerchantParameters{
+	parameters := entity.MerchantParameters{
 		Amount:          fmt.Sprintf("%d", amount),
 		Order:           orderId,
 		MerchantCode:    p.conf.Merchant.Code,
@@ -292,7 +292,7 @@ func (p *Payments) ReturnByOrder(orderId string, amount int) error {
 	return nil
 }
 
-func (p *Payments) newRequest(parameters *models.MerchantParameters) (*models.PaymentRequest, error) {
+func (p *Payments) newRequest(parameters *entity.MerchantParameters) (*entity.PaymentRequest, error) {
 	// encode parameters to Base64
 	parametersBase64, err := p.createParameters(parameters)
 	if err != nil {
@@ -308,7 +308,7 @@ func (p *Payments) newRequest(parameters *models.MerchantParameters) (*models.Pa
 		return nil, fmt.Errorf("create signature: %v", err)
 	}
 
-	request := &models.PaymentRequest{
+	request := &entity.PaymentRequest{
 		Parameters:       parametersBase64,
 		Signature:        signature,
 		SignatureVersion: "HMAC_SHA256_V1",
@@ -317,7 +317,7 @@ func (p *Payments) newRequest(parameters *models.MerchantParameters) (*models.Pa
 	return request, nil
 }
 
-func (p *Payments) getTransaction(transactionId int) (*models.Transaction, error) {
+func (p *Payments) getTransaction(transactionId int) (*entity.Transaction, error) {
 	if p.database == nil {
 		return nil, fmt.Errorf("database not set")
 	}
@@ -331,7 +331,7 @@ func (p *Payments) getTransaction(transactionId int) (*models.Transaction, error
 	return transaction, nil
 }
 
-func (p *Payments) createParameters(parameters *models.MerchantParameters) (string, error) {
+func (p *Payments) createParameters(parameters *entity.MerchantParameters) (string, error) {
 	// convert parameters to JSON string
 	parametersJson, err := json.Marshal(parameters)
 	if err != nil {
@@ -342,7 +342,7 @@ func (p *Payments) createParameters(parameters *models.MerchantParameters) (stri
 	return base64.StdEncoding.EncodeToString(parametersJson), nil
 }
 
-func (p *Payments) processRequest(request *models.PaymentRequest) {
+func (p *Payments) processRequest(request *entity.PaymentRequest) {
 	requestData, err := json.Marshal(request)
 	if err != nil {
 		p.logger.Error("create request", err)
@@ -369,8 +369,8 @@ func (p *Payments) processRequest(request *models.PaymentRequest) {
 
 }
 
-func (p *Payments) readResponse(body []byte) (*models.PaymentParameters, error) {
-	var paymentResponse models.PaymentRequest
+func (p *Payments) readResponse(body []byte) (*entity.PaymentParameters, error) {
+	var paymentResponse entity.PaymentRequest
 	err := json.Unmarshal(body, &paymentResponse)
 	if err != nil {
 		return nil, fmt.Errorf("parse response: %v", err)
@@ -378,7 +378,7 @@ func (p *Payments) readResponse(body []byte) (*models.PaymentParameters, error) 
 	return p.readParameters(paymentResponse.Parameters)
 }
 
-func (p *Payments) readParameters(parameters string) (*models.PaymentParameters, error) {
+func (p *Payments) readParameters(parameters string) (*entity.PaymentParameters, error) {
 	if parameters == "" {
 		return nil, fmt.Errorf("empty parameters")
 	}
@@ -386,7 +386,7 @@ func (p *Payments) readParameters(parameters string) (*models.PaymentParameters,
 	if err != nil {
 		return nil, fmt.Errorf("decode parameters: %v", err)
 	}
-	var paymentResult models.PaymentParameters
+	var paymentResult entity.PaymentParameters
 	err = json.Unmarshal(parametersBytes, &paymentResult)
 	if err != nil {
 		p.logger.Warn(fmt.Sprintf("parameters: %s", string(parametersBytes)))
@@ -396,7 +396,7 @@ func (p *Payments) readParameters(parameters string) (*models.PaymentParameters,
 	return &paymentResult, nil
 }
 
-func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
+func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 
 	p.logger.Info(fmt.Sprintf("response: type: %s; result: %s; order: %s; amount: %s", paymentResult.TransactionType, paymentResult.Response, paymentResult.Order, paymentResult.Amount))
 	err := p.database.SavePaymentResult(paymentResult)
@@ -489,7 +489,7 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 
 	} else {
 
-		paymentMethod := models.PaymentMethod{
+		paymentMethod := entity.PaymentMethod{
 			Description: "**** **** **** ****",
 			Identifier:  paymentResult.MerchantIdentifier,
 			CofTid:      paymentResult.MerchantCofTxnid,
@@ -520,7 +520,7 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 
 }
 
-func (p *Payments) savePaymentMethod(pm *models.PaymentMethod) error {
+func (p *Payments) savePaymentMethod(pm *entity.PaymentMethod) error {
 	if pm.UserId == "" {
 		return fmt.Errorf("empty user id")
 	}
@@ -530,7 +530,7 @@ func (p *Payments) savePaymentMethod(pm *models.PaymentMethod) error {
 	return p.database.SavePaymentMethod(pm)
 }
 
-func (p *Payments) checkPaymentResult(result *models.PaymentParameters) error {
+func (p *Payments) checkPaymentResult(result *entity.PaymentParameters) error {
 	if result.TransactionType == "0" {
 		if result.Response != "0000" {
 			return fmt.Errorf("code %s", result.Response)

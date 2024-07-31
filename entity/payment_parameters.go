@@ -1,4 +1,4 @@
-package models
+package entity
 
 type PaymentParameters struct {
 	MerchantCode       string `json:"Ds_MerchantCode" bson:"merchant_code"`

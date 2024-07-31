@@ -2,7 +2,7 @@ package internal
 
 import (
 	"electrum/config"
-	"electrum/models"
+	"electrum/entity"
 	"electrum/services"
 	"encoding/json"
 	"fmt"
@@ -118,7 +118,7 @@ func (s *Server) returnOrder(w http.ResponseWriter, r *http.Request, ps httprout
 		return
 	}
 
-	var order models.PaymentOrder
+	var order entity.PaymentOrder
 	err = json.Unmarshal(body, &order)
 	if err != nil {
 		s.logger.Error("return order: decode request body", err)

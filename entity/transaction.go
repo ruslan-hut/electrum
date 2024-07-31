@@ -1,4 +1,4 @@
-package models
+package entity
 
 import (
 	"sync"
@@ -7,6 +7,7 @@ import (
 
 type Transaction struct {
 	Id            int                `json:"transaction_id" bson:"transaction_id"`
+	SessionId     string             `json:"session_id" bson:"session_id"`
 	IsFinished    bool               `json:"is_finished" bson:"is_finished"`
 	ConnectorId   int                `json:"connector_id" bson:"connector_id"`
 	ChargePointId string             `json:"charge_point_id" bson:"charge_point_id"`
@@ -22,6 +23,7 @@ type Transaction struct {
 	PaymentAmount int                `json:"payment_amount" bson:"payment_amount"`
 	PaymentBilled int                `json:"payment_billed" bson:"payment_billed"`
 	PaymentOrder  int                `json:"payment_order" bson:"payment_order"`
+	Plan          PaymentPlan        `json:"payment_plan" bson:"payment_plan"`
 	MeterValues   []TransactionMeter `json:"meter_values" bson:"meter_values"`
 	PaymentMethod *PaymentMethod     `json:"payment_method,omitempty" bson:"payment_method"`
 	PaymentOrders []PaymentOrder     `json:"payment_orders" bson:"payment_orders"`

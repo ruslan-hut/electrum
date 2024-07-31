@@ -3,7 +3,7 @@ package internal
 import (
 	"context"
 	"electrum/config"
-	"electrum/models"
+	"electrum/entity"
 	"electrum/services"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
@@ -28,8 +28,8 @@ type MongoDB struct {
 	logRecordsNumber int64
 }
 
-func (m *MongoDB) GetTransaction(id int) (*models.Transaction, error) {
-	var transaction models.Transaction
+func (m *MongoDB) GetTransaction(id int) (*entity.Transaction, error) {
+	var transaction entity.Transaction
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -45,7 +45,7 @@ func (m *MongoDB) GetTransaction(id int) (*models.Transaction, error) {
 	return &transaction, nil
 }
 
-func (m *MongoDB) GetPaymentMethod(userId string) (*models.PaymentMethod, error) {
+func (m *MongoDB) GetPaymentMethod(userId string) (*entity.PaymentMethod, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ func (m *MongoDB) GetPaymentMethod(userId string) (*models.PaymentMethod, error)
 
 	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
 	filter := bson.D{{"user_id", userId}, {"is_default", true}}
-	var paymentMethod *models.PaymentMethod
+	var paymentMethod *entity.PaymentMethod
 	err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
 	if paymentMethod == nil {
 		filter = bson.D{{"user_id", userId}}
@@ -67,7 +67,7 @@ func (m *MongoDB) GetPaymentMethod(userId string) (*models.PaymentMethod, error)
 	return paymentMethod, nil
 }
 
-func (m *MongoDB) GetPaymentMethodByIdentifier(identifier string) (*models.PaymentMethod, error) {
+func (m *MongoDB) GetPaymentMethodByIdentifier(identifier string) (*entity.PaymentMethod, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -76,7 +76,7 @@ func (m *MongoDB) GetPaymentMethodByIdentifier(identifier string) (*models.Payme
 
 	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
 	filter := bson.D{{"identifier", identifier}}
-	var paymentMethod *models.PaymentMethod
+	var paymentMethod *entity.PaymentMethod
 	err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
 	if err != nil {
 		return nil, err
@@ -104,7 +104,7 @@ func (m *MongoDB) UpdatePaymentMethodFailCount(identifier string, count int) err
 	return nil
 }
 
-func (m *MongoDB) GetPaymentOrderByTransaction(transactionId int) (*models.PaymentOrder, error) {
+func (m *MongoDB) GetPaymentOrderByTransaction(transactionId int) (*entity.PaymentOrder, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -113,14 +113,14 @@ func (m *MongoDB) GetPaymentOrderByTransaction(transactionId int) (*models.Payme
 
 	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
 	filter := bson.D{{"transaction_id", transactionId}, {"is_completed", false}}
-	var order models.PaymentOrder
+	var order entity.PaymentOrder
 	if err = collection.FindOne(m.ctx, filter).Decode(&order); err != nil {
 		return nil, err
 	}
 	return &order, nil
 }
 
-func (m *MongoDB) SavePaymentOrder(order *models.PaymentOrder) error {
+func (m *MongoDB) SavePaymentOrder(order *entity.PaymentOrder) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -137,7 +137,7 @@ func (m *MongoDB) SavePaymentOrder(order *models.PaymentOrder) error {
 	return nil
 }
 
-func (m *MongoDB) GetLastOrder() (*models.PaymentOrder, error) {
+func (m *MongoDB) GetLastOrder() (*entity.PaymentOrder, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func (m *MongoDB) GetLastOrder() (*models.PaymentOrder, error) {
 
 	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
 	filter := bson.D{}
-	var order models.PaymentOrder
+	var order entity.PaymentOrder
 	if err = collection.FindOne(m.ctx, filter, options.FindOne().SetSort(bson.D{{"time_opened", -1}})).Decode(&order); err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ func (m *MongoDB) WriteLogMessage(data services.Data) error {
 	return err
 }
 
-func (m *MongoDB) GetUserTag(id string) (*models.UserTag, error) {
+func (m *MongoDB) GetUserTag(id string) (*entity.UserTag, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -210,7 +210,7 @@ func (m *MongoDB) GetUserTag(id string) (*models.UserTag, error) {
 
 	filter := bson.D{{"id_tag", id}}
 	collection := connection.Database(m.database).Collection(collectionUserTags)
-	var userTag models.UserTag
+	var userTag entity.UserTag
 	err = collection.FindOne(m.ctx, filter).Decode(&userTag)
 	if err != nil {
 		return nil, err
@@ -218,7 +218,7 @@ func (m *MongoDB) GetUserTag(id string) (*models.UserTag, error) {
 	return &userTag, nil
 }
 
-func (m *MongoDB) SavePaymentResult(paymentParameters *models.PaymentParameters) error {
+func (m *MongoDB) SavePaymentResult(paymentParameters *entity.PaymentParameters) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -230,7 +230,7 @@ func (m *MongoDB) SavePaymentResult(paymentParameters *models.PaymentParameters)
 	return nil
 }
 
-func (m *MongoDB) GetPaymentOrder(id int) (*models.PaymentOrder, error) {
+func (m *MongoDB) GetPaymentOrder(id int) (*entity.PaymentOrder, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -239,7 +239,7 @@ func (m *MongoDB) GetPaymentOrder(id int) (*models.PaymentOrder, error) {
 
 	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
 	filter := bson.D{{"order", id}}
-	var order models.PaymentOrder
+	var order entity.PaymentOrder
 	if err = collection.FindOne(m.ctx, filter).Decode(&order); err != nil {
 		return nil, err
 	}
@@ -247,7 +247,7 @@ func (m *MongoDB) GetPaymentOrder(id int) (*models.PaymentOrder, error) {
 }
 
 // UpdateTransaction update transaction billed data
-func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
+func (m *MongoDB) UpdateTransaction(transaction *entity.Transaction) error {
 	connection, err := m.connect()
 	if err != nil {
 		return err
@@ -269,7 +269,7 @@ func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
 	return nil
 }
 
-func (m *MongoDB) GetPaymentMethodById(identifier, userId string) (*models.PaymentMethod, error) {
+func (m *MongoDB) GetPaymentMethodById(identifier, userId string) (*entity.PaymentMethod, error) {
 	connection, err := m.connect()
 	if err != nil {
 		return nil, err
@@ -278,14 +278,14 @@ func (m *MongoDB) GetPaymentMethodById(identifier, userId string) (*models.Payme
 
 	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
 	filter := bson.D{{"identifier", identifier}, {"user_id", userId}}
-	var paymentMethod models.PaymentMethod
+	var paymentMethod entity.PaymentMethod
 	if err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod); err != nil {
 		return nil, err
 	}
 	return &paymentMethod, nil
 }
 
-func (m *MongoDB) SavePaymentMethod(paymentMethod *models.PaymentMethod) error {
+func (m *MongoDB) SavePaymentMethod(paymentMethod *entity.PaymentMethod) error {
 	saved, _ := m.GetPaymentMethodById(paymentMethod.Identifier, paymentMethod.UserId)
 	if saved != nil {
 		return fmt.Errorf("payment method with identifier %s... already exists", paymentMethod.Identifier[0:10])
