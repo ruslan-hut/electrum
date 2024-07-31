@@ -96,10 +96,14 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		return nil
 	}
 
-	tag, err := p.database.GetUserTag(transaction.IdTag)
-	if err != nil {
-		p.logger.Error("get user tag", err)
-		return err
+	// --------------------------------------------- USER TAG
+	tag := transaction.UserTag
+	if tag == nil {
+		tag, err = p.database.GetUserTag(transaction.IdTag)
+		if err != nil {
+			p.logger.Error("get user tag", err)
+			return err
+		}
 	}
 	if tag.UserId == "" {
 		//p.logger.Warn(fmt.Sprintf("empty user id for tag %v", tag.IdTag))
@@ -112,18 +116,24 @@ func (p *Payments) PayTransaction(transactionId int) error {
 
 		return fmt.Errorf("empty user id for tag %v", secret(transaction.IdTag))
 	}
-	paymentMethod, err := p.database.GetPaymentMethod(tag.UserId)
-	if err != nil {
-		//p.logger.Error("failed to get payment method", err)
 
-		transaction.PaymentBilled = transaction.PaymentAmount
-		err = p.database.UpdateTransaction(transaction)
+	// --------------------------------------------- PAYMENT METHOD
+	paymentMethod := transaction.PaymentMethod
+	if paymentMethod == nil {
+		paymentMethod, err = p.database.GetPaymentMethod(tag.UserId)
 		if err != nil {
-			p.logger.Error("update transaction", err)
-		}
+			//p.logger.Error("failed to get payment method", err)
 
-		return fmt.Errorf("id %v has no payment method", secret(transaction.IdTag))
+			transaction.PaymentBilled = transaction.PaymentAmount
+			err = p.database.UpdateTransaction(transaction)
+			if err != nil {
+				p.logger.Error("update transaction", err)
+			}
+
+			return fmt.Errorf("id %v has no payment method", secret(transaction.IdTag))
+		}
 	}
+
 	consumed := (transaction.MeterStop - transaction.MeterStart) / 1000
 	description := fmt.Sprintf("%s:%d %dkW", transaction.ChargePointId, transaction.ConnectorId, consumed)
 
@@ -437,6 +447,7 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 			}
 			transaction.PaymentBilled = transaction.PaymentAmount
 			transaction.PaymentOrder = order.Order
+			transaction.AddOrder(*order)
 			err = p.database.UpdateTransaction(transaction)
 			if err != nil {
 				p.logger.Error("update transaction", err)
@@ -468,6 +479,7 @@ func (p *Payments) processResponse(paymentResult *models.PaymentParameters) {
 
 		transaction.PaymentOrder = order.Order
 		transaction.PaymentBilled = order.Amount
+		transaction.AddOrder(*order)
 
 		err = p.database.UpdateTransaction(transaction)
 		if err != nil {

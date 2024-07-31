@@ -260,6 +260,7 @@ func (m *MongoDB) UpdateTransaction(transaction *models.Transaction) error {
 		{"$set", bson.D{
 			{"payment_order", transaction.PaymentOrder},
 			{"payment_billed", transaction.PaymentBilled},
+			{"payment_orders", transaction.PaymentOrders},
 		}},
 	}
 	if _, err = collection.UpdateOne(m.ctx, filter, update); err != nil {
