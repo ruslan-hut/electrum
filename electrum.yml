@@ -1,0 +1,25 @@
+---
+
+is_debug: false
+disable_payment: false
+log_records: 1000
+firebase_key: ${FIREBASE_KEY}
+listen:
+  type: port
+  bind_ip: 127.0.0.1
+  port: ${PORT}
+  tls_enabled: false
+  cert_file:
+  key_file:
+mongo:
+  enabled: true
+  host: ${MONGO_HOST}
+  port: ${MONGO_PORT}
+  user: ${MONGO_USER}
+  password: ${MONGO_PASS}
+  database: ${MONGO_DB}
+merchant:
+  secret: ${MERCHANT_SECRET}
+  code: ${MERCHANT_CODE}
+  terminal: ${MERCHANT_TERMINAL}
+  request_url: ${MERCHANT_REQUEST_URL}

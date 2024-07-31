@@ -1,0 +1,79 @@
+name: Deploy to wattbrews.me
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    name: Build and Deploy
+    runs-on: ubuntu-20.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare configuration file
+        run: |
+          sed -i 's|${PORT}|'"$PORT"'|g' electrum.yml
+          sed -i 's|${FIREBASE_KEY}|'"$FIREBASE_KEY"'|g' electrum.yml
+          sed -i 's|${MONGO_HOST}|'"$MONGO_HOST"'|g' electrum.yml
+          sed -i 's|${MONGO_PORT}|'"$MONGO_PORT"'|g' electrum.yml
+          sed -i 's|${MONGO_USER}|'"$MONGO_USER"'|g' electrum.yml
+          sed -i 's|${MONGO_PASS}|'"$MONGO_PASS"'|g' electrum.yml
+          sed -i 's|${MONGO_DB}|'"$MONGO_DB"'|g' electrum.yml
+          sed -i 's|${MERCHANT_SECRET}|'"$MERCHANT_SECRET"'|g' electrum.yml
+          sed -i 's|${MERCHANT_CODE}|'"$MERCHANT_CODE"'|g' electrum.yml
+          sed -i 's|${MERCHANT_TERMINAL}|'"$MERCHANT_TERMINAL"'|g' electrum.yml
+          sed -i 's|${MERCHANT_REQUEST_URL}|'"$MERCHANT_REQUEST_URL"'|g' electrum.yml
+        env:
+          FIREBASE_KEY: ${{ vars.FIREBASE_KEY }}
+          PORT: ${{ vars.PORT }}
+          MONGO_HOST: ${{ vars.MONGO_HOST }}
+          MONGO_PORT: ${{ vars.MONGO_PORT }}
+          MONGO_USER: ${{ secrets.MONGO_USER }}
+          MONGO_PASS: ${{ secrets.MONGO_PASS }}
+          MONGO_DB: ${{ vars.MONGO_DB }}
+          MERCHANT_SECRET: ${{ secrets.MERCHANT_SECRET }}
+          MERCHANT_CODE: ${{ secrets.MERCHANT_CODE }}
+          MERCHANT_TERMINAL: ${{ vars.MERCHANT_TERMINAL }}
+          MERCHANT_REQUEST_URL: ${{ vars.MERCHANT_REQUEST_URL }}
+
+      - name: Copy Configuration to Server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "electrum.yml"
+          target: "/etc/conf/"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.19'
+
+      - name: Build Go application
+        run: |
+          go build -v -o electrum
+
+      - name: Deploy to server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: "electrum"
+          target: "/usr/local/bin/"
+
+      - name: Restart Application
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            systemctl restart electrum.service 
