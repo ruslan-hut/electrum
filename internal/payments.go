@@ -447,17 +447,18 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 		// close transaction on payment error; temporary solution
 		if order.TransactionId > 0 {
 			p.logger.Info(fmt.Sprintf("close transaction %v on payment error", order.TransactionId))
-			transaction, err := p.database.GetTransaction(order.TransactionId)
-			if err != nil {
-				p.logger.Error("get transaction", err)
+			transaction, e := p.database.GetTransaction(order.TransactionId)
+			if e != nil {
+				p.logger.Error("get transaction", e)
 				return
 			}
 			transaction.PaymentBilled = transaction.PaymentAmount
 			transaction.PaymentOrder = order.Order
+			transaction.PaymentError = paymentResult.Response
 			transaction.AddOrder(*order)
-			err = p.database.UpdateTransaction(transaction)
-			if err != nil {
-				p.logger.Error("update transaction", err)
+			e = p.database.UpdateTransaction(transaction)
+			if e != nil {
+				p.logger.Error("update transaction", e)
 			}
 		}
 
@@ -478,19 +479,20 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 
 	if order.TransactionId > 0 {
 
-		transaction, err := p.database.GetTransaction(order.TransactionId)
-		if err != nil {
-			p.logger.Error("get transaction", err)
+		transaction, e := p.database.GetTransaction(order.TransactionId)
+		if e != nil {
+			p.logger.Error("get transaction", e)
 			return
 		}
 
 		transaction.PaymentOrder = order.Order
 		transaction.PaymentBilled = order.Amount
+		transaction.PaymentError = ""
 		transaction.AddOrder(*order)
 
-		err = p.database.UpdateTransaction(transaction)
-		if err != nil {
-			p.logger.Error("update transaction", err)
+		e = p.database.UpdateTransaction(transaction)
+		if e != nil {
+			p.logger.Error("update transaction", e)
 			return
 		}
 
