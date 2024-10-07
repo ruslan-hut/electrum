@@ -259,6 +259,7 @@ func (m *MongoDB) UpdateTransaction(transaction *entity.Transaction) error {
 	update := bson.D{
 		{"$set", bson.D{
 			{"payment_order", transaction.PaymentOrder},
+			{"payment_error", transaction.PaymentError},
 			{"payment_billed", transaction.PaymentBilled},
 			{"payment_orders", transaction.PaymentOrders},
 		}},
