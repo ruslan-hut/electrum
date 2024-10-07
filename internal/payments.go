@@ -133,6 +133,13 @@ func (p *Payments) PayTransaction(transactionId int) error {
 			return fmt.Errorf("id %v has no payment method", secret(transaction.IdTag))
 		}
 	}
+	if paymentMethod.CofTid == "" {
+		storedPM, e := p.database.GetPaymentMethod(tag.UserId)
+		if e == nil {
+			paymentMethod = storedPM
+			p.logger.Warn(fmt.Sprintf("payment method loaded from db: %s", secret(storedPM.Identifier)))
+		}
+	}
 
 	consumed := (transaction.MeterStop - transaction.MeterStart) / 1000
 	description := fmt.Sprintf("%s:%d %dkW", transaction.ChargePointId, transaction.ConnectorId, consumed)
