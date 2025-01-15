@@ -533,6 +533,13 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 func (p *Payments) closeOrderOnError(order *entity.PaymentOrder, result string) {
 	p.updatePaymentMethodFailCounter(order.Identifier, 1)
 
+	if !order.IsCompleted {
+		order.IsCompleted = true
+		order.Result = result
+		order.TimeClosed = time.Now()
+		_ = p.database.SavePaymentOrder(order)
+	}
+
 	// close transaction on payment error; temporary solution
 	if order.TransactionId > 0 {
 		p.logger.Info(fmt.Sprintf("close transaction %v on payment error", order.TransactionId))
