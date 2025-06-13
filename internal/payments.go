@@ -133,8 +133,8 @@ func (p *Payments) PayTransaction(transactionId int) error {
 			return fmt.Errorf("id %v has no payment method", secret(transaction.IdTag))
 		}
 	}
-	// try to get another payment method if current has some problems
-	if paymentMethod.CofTid == "" || paymentMethod.FailCount > 0 {
+	// try to get another payment method if the current has some problems or the transaction has previous errors
+	if paymentMethod.CofTid == "" || paymentMethod.FailCount > 0 || transaction.PaymentError != "" {
 		storedPM, _ := p.database.GetPaymentMethod(tag.UserId)
 		if storedPM != nil && storedPM.Identifier != paymentMethod.Identifier {
 			paymentMethod = storedPM
