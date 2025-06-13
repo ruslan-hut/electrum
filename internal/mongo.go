@@ -5,6 +5,7 @@ import (
 	"electrum/config"
 	"electrum/entity"
 	"electrum/services"
+	"errors"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -52,19 +53,25 @@ func (m *MongoDB) GetPaymentMethod(userId string) (*entity.PaymentMethod, error)
 	}
 	defer m.disconnect(connection)
 
-	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
-	filter := bson.D{{"user_id", userId}, {"is_default", true}}
-	var paymentMethod *entity.PaymentMethod
-	err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
-	if paymentMethod == nil || paymentMethod.FailCount > 0 {
-		filter = bson.D{{"user_id", userId}}
-		opt := options.FindOne().SetSort(bson.D{{"fail_count", 1}})
-		err = collection.FindOne(m.ctx, filter, opt).Decode(&paymentMethod)
-	}
-	if err != nil {
+	coll := connection.Database(m.database).Collection(collectionPaymentMethods)
+
+	// 1. try to get default
+	var pm entity.PaymentMethod
+	err = coll.FindOne(m.ctx, bson.D{{"user_id", userId}, {"is_default", true}}).Decode(&pm)
+	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, err
 	}
-	return paymentMethod, nil
+
+	// 2. if no default or fail count > 0
+	if errors.Is(err, mongo.ErrNoDocuments) || pm.FailCount > 0 {
+		// search for min fail count
+		opt := options.FindOne().SetSort(bson.D{{"fail_count", 1}, {"_id", 1}})
+		if err = coll.FindOne(m.ctx, bson.D{{"user_id", userId}}, opt).Decode(&pm); err != nil {
+			return nil, err
+		}
+	}
+
+	return &pm, nil
 }
 
 func (m *MongoDB) GetPaymentMethodByIdentifier(identifier string) (*entity.PaymentMethod, error) {

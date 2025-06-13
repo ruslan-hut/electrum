@@ -135,8 +135,8 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	}
 	// try to get another payment method if current has some problems
 	if paymentMethod.CofTid == "" || paymentMethod.FailCount > 0 {
-		storedPM, e := p.database.GetPaymentMethod(tag.UserId)
-		if e == nil && storedPM.Identifier != paymentMethod.Identifier {
+		storedPM, _ := p.database.GetPaymentMethod(tag.UserId)
+		if storedPM != nil && storedPM.Identifier != paymentMethod.Identifier {
 			paymentMethod = storedPM
 			p.logger.Warn(fmt.Sprintf("payment method loaded from db: %s", secret(storedPM.Identifier)))
 		}
