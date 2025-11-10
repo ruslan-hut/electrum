@@ -487,7 +487,7 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 		}
 
 		transaction.PaymentOrder = order.Order
-		transaction.PaymentBilled = order.Amount
+		transaction.PaymentBilled = transaction.PaymentBilled + order.Amount
 		transaction.PaymentError = ""
 		transaction.AddOrder(*order)
 
