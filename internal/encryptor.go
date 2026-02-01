@@ -36,7 +36,7 @@ func NewEncryptor(secret string, parameters string, order string) *Encryptor {
 // CreateSignature generates a Redsys-compliant signature using 3DES and HMAC-SHA256.
 // The signature process:
 // 1. Decode the merchant secret from Base64
-// 2. Encrypt the order number using 3DES with the secret as key
+// 2. Encrypt the order number using 3DES-CBC with zero-padding (Redsys requirement)
 // 3. Use the encrypted result as HMAC key to sign the parameters
 // 4. Return the Base64-encoded HMAC signature
 func (e *Encryptor) CreateSignature() (string, error) {
@@ -60,11 +60,14 @@ func (e *Encryptor) CreateSignature() (string, error) {
 	return signature, nil
 }
 
-// encrypt3DES encrypts plaintext using 3DES in CBC mode.
-// Note: This implementation uses a fixed all-zero IV as required by Redsys API specification.
-// While using a fixed IV is generally insecure, it is mandated by Redsys for signature generation.
-// Security note: The encrypted output is used as an HMAC key, not for confidentiality,
-// which somewhat mitigates the fixed IV concern.
+// encrypt3DES encrypts plaintext using 3DES in CBC mode with zero-padding.
+// Redsys-specific requirements (mandated by their API specification):
+// 1. Fixed all-zero IV (not cryptographically secure but required)
+// 2. Zero-padding (NOT PKCS#7 - this is critical for signature verification)
+// Security notes:
+// - The encrypted output is used as an HMAC key, not for confidentiality
+// - Zero-padding is safe here because order numbers are numeric strings
+// - These non-standard practices are mandated by Redsys payment gateway
 func (e *Encryptor) encrypt3DES(plainText string, key []byte) ([]byte, error) {
 	if plainText == "" {
 		return nil, errors.New("plainText cannot be empty")
@@ -81,8 +84,10 @@ func (e *Encryptor) encrypt3DES(plainText string, key []byte) ([]byte, error) {
 	// WARNING: This is not cryptographically secure but is mandated by Redsys
 	iv := []byte{0, 0, 0, 0, 0, 0, 0, 0}
 
-	// Apply PKCS#7 padding
-	toEncryptArray = pkcs7Pad(toEncryptArray, block.BlockSize())
+	// Apply zero-padding as required by Redsys signature algorithm
+	// NOTE: Redsys expects zero-padding, NOT PKCS#7 padding
+	// Zero-padding is safe here because order numbers are numeric strings
+	toEncryptArray = zeroPad(toEncryptArray, block.BlockSize())
 
 	ciphertext := make([]byte, len(toEncryptArray))
 
@@ -93,12 +98,16 @@ func (e *Encryptor) encrypt3DES(plainText string, key []byte) ([]byte, error) {
 	return ciphertext, nil
 }
 
-// pkcs7Pad applies PKCS#7 padding to the data.
-// PKCS#7 padding adds N bytes with value N, where N is the number of bytes needed
-// to make the data a multiple of blockSize.
-func pkcs7Pad(data []byte, blockSize int) []byte {
+// zeroPad applies zero-byte padding to make data a multiple of blockSize.
+// This is specifically required by Redsys for signature calculation.
+// Zero-padding appends null bytes (0x00) until the data length is a multiple of blockSize.
+func zeroPad(data []byte, blockSize int) []byte {
 	padding := blockSize - (len(data) % blockSize)
-	padText := bytes.Repeat([]byte{byte(padding)}, padding)
+	if padding == blockSize {
+		// Already aligned, no padding needed
+		return data
+	}
+	padText := bytes.Repeat([]byte{0x00}, padding)
 	return append(data, padText...)
 }
 

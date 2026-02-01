@@ -126,7 +126,7 @@ go mod tidy
 
 **Fail Counter Strategy**: Payment methods track `FailCount` to automatically switch to more reliable payment methods when issues occur.
 
-**Base64 + HMAC Signature**: Redsys requires Base64-encoded JSON parameters with HMAC-SHA256 signature using 3DES-encrypted order number with PKCS#7 padding.
+**Base64 + HMAC Signature**: Redsys requires Base64-encoded JSON parameters with HMAC-SHA256 signature using 3DES-encrypted order number with zero-padding (NOT PKCS#7).
 
 **Persistent Connection Pooling**: MongoDB client established once at startup and reused (10-100x performance improvement).
 
