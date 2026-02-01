@@ -1,3 +1,4 @@
+// Package entity defines data models for the Electrum payment service.
 package entity
 
 import (
@@ -5,6 +6,8 @@ import (
 	"time"
 )
 
+// Transaction represents an electric vehicle charging session with payment tracking.
+// It tracks energy consumption, payment status, and associated payment orders.
 type Transaction struct {
 	Id            int                `json:"transaction_id" bson:"transaction_id"`
 	SessionId     string             `json:"session_id" bson:"session_id"`
@@ -29,23 +32,26 @@ type Transaction struct {
 	PaymentMethod *PaymentMethod     `json:"payment_method,omitempty" bson:"payment_method"`
 	PaymentOrders []PaymentOrder     `json:"payment_orders" bson:"payment_orders"`
 	UserTag       *UserTag           `json:"user_tag,omitempty" bson:"user_tag"`
-	mutex         *sync.Mutex
+
+	// mutex provides thread-safe access to transaction data.
+	// Changed from *sync.Mutex to sync.Mutex to ensure it's always initialized.
+	// Note: This field is not serialized to JSON/BSON (no tags).
+	mutex sync.Mutex
 }
 
+// Lock acquires the transaction mutex for thread-safe operations.
+// Use with defer Unlock() to ensure the lock is released.
 func (t *Transaction) Lock() {
 	t.mutex.Lock()
 }
 
+// Unlock releases the transaction mutex.
 func (t *Transaction) Unlock() {
 	t.mutex.Unlock()
 }
 
-func (t *Transaction) Init() {
-	if t.mutex == nil {
-		t.mutex = &sync.Mutex{}
-	}
-}
-
+// AddOrder adds a payment order to the transaction if it doesn't already exist.
+// Orders are identified by their Order number to prevent duplicates.
 func (t *Transaction) AddOrder(order PaymentOrder) {
 	for _, paymentOrder := range t.PaymentOrders {
 		if paymentOrder.Order == order.Order {

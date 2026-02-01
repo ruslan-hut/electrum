@@ -1,6 +1,6 @@
 module electrum
 
-go 1.19
+go 1.21
 
 require (
 	github.com/ilyakaznacheev/cleanenv v1.5.0

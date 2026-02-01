@@ -1,0 +1,55 @@
+---
+# Electrum Configuration Template
+# Copy this file to config.yml and replace placeholders with actual values
+# Or use environment variables (prefix with $ in this file)
+
+# Enable debug logging
+is_debug: false
+
+# Disable actual payment processing (for testing)
+disable_payment: false
+
+# Number of log records to keep in MongoDB (0 = unlimited)
+log_records: 1000
+
+# Path to Firebase credentials JSON file
+# Can also be set via FIREBASE_KEY environment variable
+firebase_key: /path/to/firebase.json
+
+listen:
+  type: port
+  bind_ip: 0.0.0.0
+  port: 5100
+
+  # TLS/HTTPS configuration
+  tls_enabled: false
+  cert_file: /path/to/cert.pem
+  key_file: /path/to/key.pem
+
+mongo:
+  enabled: true
+  host: 127.0.0.1
+  port: 27017
+
+  # SECURITY: Use environment variables for credentials in production
+  # Set MONGO_USER and MONGO_PASS environment variables
+  user: your_mongo_user
+  password: your_mongo_password
+  database: electrum
+
+merchant:
+  # SECURITY: NEVER commit real credentials to git
+  # These values should be set via environment variables in production:
+  # - MERCHANT_SECRET: Your Redsys merchant secret key (Base64-encoded)
+  # - MERCHANT_CODE: Your Redsys merchant code
+  # - MERCHANT_TERMINAL: Your Redsys terminal number
+  # - MERCHANT_REQUEST_URL: Redsys API endpoint URL
+
+  secret: YOUR_BASE64_ENCODED_SECRET_HERE
+  code: YOUR_MERCHANT_CODE_HERE
+  terminal: YOUR_TERMINAL_NUMBER_HERE
+
+  # Redsys API endpoint
+  # Test: https://sis-t.redsys.es:25443/sis/rest/trataPeticionREST
+  # Production: https://sis.redsys.es/sis/rest/trataPeticionREST
+  request_url: https://sis-t.redsys.es:25443/sis/rest/trataPeticionREST

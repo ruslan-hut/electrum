@@ -1,3 +1,6 @@
+// Package internal provides core payment processing services for the Electrum
+// payment gateway integration with Redsys.
+// https://pagosonline.redsys.es/desarrolladores-inicio/documentacion-operativa/autorizacion/
 package internal
 
 import (
@@ -11,12 +14,17 @@ import (
 	"fmt"
 )
 
+// Encryptor handles cryptographic signature generation for Redsys payment gateway.
+// It implements the Redsys-specific signature algorithm using 3DES encryption
+// and HMAC-SHA256 for request authentication.
 type Encryptor struct {
-	secret     string // signature encoded with Base64
-	parameters string
+	secret     string // merchant secret key encoded with Base64
+	parameters string // Base64-encoded merchant parameters
 	order      string // order number to be encrypted
 }
 
+// NewEncryptor creates a new Encryptor for Redsys signature generation.
+// The secret must be Base64-encoded, as provided by Redsys.
 func NewEncryptor(secret string, parameters string, order string) *Encryptor {
 	return &Encryptor{
 		secret:     secret,
@@ -25,27 +33,38 @@ func NewEncryptor(secret string, parameters string, order string) *Encryptor {
 	}
 }
 
+// CreateSignature generates a Redsys-compliant signature using 3DES and HMAC-SHA256.
+// The signature process:
+// 1. Decode the merchant secret from Base64
+// 2. Encrypt the order number using 3DES with the secret as key
+// 3. Use the encrypted result as HMAC key to sign the parameters
+// 4. Return the Base64-encoded HMAC signature
 func (e *Encryptor) CreateSignature() (string, error) {
-
 	key, err := base64.StdEncoding.DecodeString(e.secret)
 	if err != nil {
-		return "", fmt.Errorf("decode secret: %v", err)
+		return "", fmt.Errorf("decode secret: %w", err)
 	}
 
-	// encrypt signature with 3DES
+	// Encrypt order number with 3DES using Redsys-specific algorithm
 	signatureEncrypted, err := e.encrypt3DES(e.order, key)
 	if err != nil {
-		return "", fmt.Errorf("encrypt3DES: %v", err)
+		return "", fmt.Errorf("encrypt3DES: %w", err)
 	}
 
-	// create hash with SHA256
+	// Create HMAC-SHA256 signature using encrypted order as key
 	hash := e.mac256(e.parameters, signatureEncrypted)
-	// encode hash to Base64
+
+	// Encode signature to Base64 for transmission
 	signature := base64.StdEncoding.EncodeToString(hash)
 
 	return signature, nil
 }
 
+// encrypt3DES encrypts plaintext using 3DES in CBC mode.
+// Note: This implementation uses a fixed all-zero IV as required by Redsys API specification.
+// While using a fixed IV is generally insecure, it is mandated by Redsys for signature generation.
+// Security note: The encrypted output is used as an HMAC key, not for confidentiality,
+// which somewhat mitigates the fixed IV concern.
 func (e *Encryptor) encrypt3DES(plainText string, key []byte) ([]byte, error) {
 	if plainText == "" {
 		return nil, errors.New("plainText cannot be empty")
@@ -55,31 +74,36 @@ func (e *Encryptor) encrypt3DES(plainText string, key []byte) ([]byte, error) {
 
 	block, err := des.NewTripleDESCipher(key)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create 3DES cipher: %w", err)
 	}
 
-	// SALT used in 3DES encryption process
-	salt := []byte{0, 0, 0, 0, 0, 0, 0, 0}
+	// Fixed IV as required by Redsys specification
+	// WARNING: This is not cryptographically secure but is mandated by Redsys
+	iv := []byte{0, 0, 0, 0, 0, 0, 0, 0}
 
-	// Padding
-	padding := block.BlockSize() - len(toEncryptArray)%block.BlockSize()
-	addText := bytes.Repeat([]byte{0}, padding)
-	toEncryptArray = append(toEncryptArray, addText...)
+	// Apply PKCS#7 padding
+	toEncryptArray = pkcs7Pad(toEncryptArray, block.BlockSize())
 
 	ciphertext := make([]byte, len(toEncryptArray))
 
-	// Create the CBC mode
-	mode := cipher.NewCBCEncrypter(block, salt)
-
-	// Encrypt
-	//fmt.Printf("Key: %x\n", key)
-	//fmt.Printf("Cleartext: %x\n", toEncryptArray)
+	// Encrypt using CBC mode with fixed IV
+	mode := cipher.NewCBCEncrypter(block, iv)
 	mode.CryptBlocks(ciphertext, toEncryptArray)
-	//fmt.Printf("Ciphertext: %x\n", ciphertext)
 
 	return ciphertext, nil
 }
 
+// pkcs7Pad applies PKCS#7 padding to the data.
+// PKCS#7 padding adds N bytes with value N, where N is the number of bytes needed
+// to make the data a multiple of blockSize.
+func pkcs7Pad(data []byte, blockSize int) []byte {
+	padding := blockSize - (len(data) % blockSize)
+	padText := bytes.Repeat([]byte{byte(padding)}, padding)
+	return append(data, padText...)
+}
+
+// mac256 computes HMAC-SHA256 of the message using the provided key.
+// This is used to create the final signature for Redsys requests.
 func (e *Encryptor) mac256(message string, key []byte) []byte {
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(message))
