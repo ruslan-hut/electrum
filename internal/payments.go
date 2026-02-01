@@ -224,19 +224,32 @@ func (p *Payments) PayTransaction(ctx context.Context, transactionId int) error 
 
 	order := fmt.Sprintf("%d", paymentOrder.Order)
 
+	// Prepare Redsys MIT (Merchant Initiated Transaction) parameters
+	// This is a subsequent recurring payment using stored credentials
 	parameters := entity.MerchantParameters{
 		Amount:          fmt.Sprintf("%d", amount),
 		Order:           order,
 		Identifier:      paymentMethod.Identifier,
 		MerchantCode:    p.conf.Merchant.Code,
-		Currency:        "978",
-		TransactionType: "0",
+		Currency:        "978", // EUR
+		TransactionType: "0",   // 0 = Authorization/Purchase, 3 = Refund
 		Terminal:        p.conf.Merchant.Terminal,
-		DirectPayment:   "true",
-		Exception:       "MIT",
-		CofIni:          "N",
-		CofType:         "C",
-		CofTid:          paymentMethod.CofTid,
+		// DirectPayment: "true" for MIT using stored token (no redirect)
+		DirectPayment: "true",
+		// Exception: "MIT" signals PSD2 Merchant Initiated Transaction exemption
+		// Required for merchant-initiated payments without cardholder participation
+		Exception: "MIT",
+		// CofIni: "N" indicates this is NOT the initial credential storage transaction
+		// Initial transactions use "S", subsequent use "N"
+		CofIni: "N",
+		// CofType: "R" for Recurring payments (variable amounts, defined intervals)
+		// "R" = Recurring (EV charging sessions with variable amounts)
+		// "I" = Installments (fixed amounts, fixed intervals)
+		// "C" = Others (one-time misc transactions)
+		CofType: "R",
+		// CofTid: Network transaction ID from the initial authorization
+		// This links the current MIT transaction to the original cardholder-initiated auth
+		CofTid: paymentMethod.CofTid,
 	}
 	p.logger.Info(fmt.Sprintf("order: %s; identifier: %s; txnid: %s", order, secret(parameters.Identifier), secret(parameters.CofTid)))
 

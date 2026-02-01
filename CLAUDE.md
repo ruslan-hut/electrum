@@ -166,12 +166,31 @@ Key configuration sections:
 - 0900: Successful refund
 - SIS####: Error codes from Redsys
 
-**COF (Credential on File) Parameters**:
-- `DS_MERCHANT_COF_INI`: N (not initial, using stored method)
-- `DS_MERCHANT_COF_TYPE`: C (CIT - Cardholder Initiated Transaction)
-- `DS_MERCHANT_COF_TXNID`: Transaction ID from previous tokenization
-- `DS_MERCHANT_DIRECTPAYMENT`: true (direct payment without redirect)
-- `DS_MERCHANT_EXCEP_SCA`: MIT (Merchant Initiated Transaction exemption)
+**MIT (Merchant Initiated Transaction) Flow**:
+
+This service implements MIT transactions for recurring EV charging payments:
+
+1. **Initial Authorization (CIT)**: First payment requires cardholder participation with 3D-Secure authentication
+   - Customer authorizes card storage during initial transaction
+   - Redsys returns a network transaction ID (DS_MERCHANT_COF_TXNID)
+   - Payment method and COF_TXNID are stored for future use
+
+2. **Subsequent Charges (MIT)**: Future charging sessions use stored credentials without cardholder interaction
+   - System automatically charges for completed charging sessions
+   - No redirect or 3D-Secure challenge required
+   - Uses MIT exemption under PSD2 regulations
+
+**COF (Credential on File) Parameters for MIT Transactions**:
+- `DS_MERCHANT_COF_INI`: N (not initial - subsequent transaction using stored credentials; S = initial)
+- `DS_MERCHANT_COF_TYPE`: R (Recurring payments with variable amounts and defined intervals)
+  - R = Recurring (EV charging sessions with variable amounts)
+  - I = Installments (fixed amounts, fixed intervals)
+  - C = Others (one-time miscellaneous transactions)
+- `DS_MERCHANT_COF_TXNID`: Network transaction ID from the initial cardholder authorization
+- `DS_MERCHANT_DIRECTPAYMENT`: true (direct payment using stored token without cardholder redirect)
+- `DS_MERCHANT_EXCEP_SCA`: MIT (Merchant Initiated Transaction exemption per PSD2)
+  - Required for all merchant-initiated payments without cardholder participation
+  - Ensures transactions are not declined due to missing SCA authentication
 
 ## Important Notes
 
