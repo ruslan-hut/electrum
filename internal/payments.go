@@ -16,19 +16,32 @@ import (
 	"time"
 )
 
+// Payments handles payment processing with Redsys payment gateway.
 type Payments struct {
 	conf       *config.Config
 	database   services.Database
 	logger     services.LogHandler
 	mutex      *sync.Mutex
 	requestUrl string
+	httpClient *http.Client
 }
 
+// NewPayments creates a new payment processing service with configured HTTP client.
+// The HTTP client includes timeouts and connection pooling for reliable external API calls.
 func NewPayments(config *config.Config) *Payments {
 	return &Payments{
 		conf:       config,
 		requestUrl: config.Merchant.RequestUrl,
 		mutex:      &sync.Mutex{},
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+				DisableKeepAlives:   false,
+			},
+		},
 	}
 }
 
@@ -145,12 +158,14 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	consumed := (transaction.MeterStop - transaction.MeterStart) / 1000
 	description := fmt.Sprintf("%s:%d %dkW", transaction.ChargePointId, transaction.ConnectorId, consumed)
 
-	orderToClose, _ := p.database.GetPaymentOrderByTransaction(transaction.Id)
-	if orderToClose != nil {
+	orderToClose, err := p.database.GetPaymentOrderByTransaction(transaction.Id)
+	if err == nil && orderToClose != nil {
 		orderToClose.IsCompleted = true
 		orderToClose.Result = "closed without response"
 		orderToClose.TimeClosed = time.Now()
-		_ = p.database.SavePaymentOrder(orderToClose)
+		if err := p.database.SavePaymentOrder(orderToClose); err != nil {
+			p.logger.Error("failed to close previous payment order", err)
+		}
 		p.updatePaymentMethodFailCounter(orderToClose.Identifier, 1)
 	}
 
@@ -350,6 +365,8 @@ func (p *Payments) createParameters(parameters *entity.MerchantParameters) (stri
 	return base64.StdEncoding.EncodeToString(parametersJson), nil
 }
 
+// processRequest sends a payment request to Redsys and processes the response.
+// This runs in a goroutine to avoid blocking the HTTP handler.
 func (p *Payments) processRequest(request *entity.PaymentRequest, orderId int) {
 	requestData, err := json.Marshal(request)
 	if err != nil {
@@ -357,19 +374,22 @@ func (p *Payments) processRequest(request *entity.PaymentRequest, orderId int) {
 		return
 	}
 
-	response, err := http.Post(p.requestUrl, "application/json", bytes.NewBuffer(requestData))
+	response, err := p.httpClient.Post(p.requestUrl, "application/json", bytes.NewBuffer(requestData))
 	if err != nil {
 		p.logger.Error("post request", err)
 		return
 	}
+	defer response.Body.Close()
+
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		p.logger.Error("read response body", err)
 		return
 	}
+
 	paymentResult, err := p.readResponse(body)
 	if err != nil {
-		// check if we have an error response from RedSys and close the order
+		// check if we have an error response from Redsys and close the order
 		code, e := p.checkErrorResponse(body)
 		if e != nil {
 			p.logger.Warn(fmt.Sprintf("unrecognized response: %s", string(body)))
@@ -384,7 +404,6 @@ func (p *Payments) processRequest(request *entity.PaymentRequest, orderId int) {
 	}
 
 	p.processResponse(paymentResult)
-
 }
 
 func (p *Payments) readResponse(body []byte) (*entity.PaymentParameters, error) {
@@ -530,7 +549,8 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 
 }
 
-// close order on error
+// closeOrderOnError marks a payment order as failed and closes it.
+// This is called when payment processing encounters an error.
 func (p *Payments) closeOrderOnError(order *entity.PaymentOrder, result string) {
 	p.updatePaymentMethodFailCounter(order.Identifier, 1)
 
@@ -538,7 +558,9 @@ func (p *Payments) closeOrderOnError(order *entity.PaymentOrder, result string) 
 		order.IsCompleted = true
 		order.Result = result
 		order.TimeClosed = time.Now()
-		_ = p.database.SavePaymentOrder(order)
+		if err := p.database.SavePaymentOrder(order); err != nil {
+			p.logger.Error("failed to save payment order on error", err)
+		}
 	}
 
 	// close transaction on payment error; temporary solution

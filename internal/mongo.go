@@ -10,7 +10,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"log"
 )
 
 const (
@@ -22,165 +21,124 @@ const (
 	collectionPayment        = "payment"
 )
 
+// MongoDB provides database operations for the Electrum payment service.
+// It maintains a persistent connection pool to MongoDB for optimal performance.
 type MongoDB struct {
+	client           *mongo.Client
 	ctx              context.Context
-	clientOptions    *options.ClientOptions
 	database         string
 	logRecordsNumber int64
 }
 
+// GetTransaction retrieves a transaction by ID from the database.
 func (m *MongoDB) GetTransaction(id int) (*entity.Transaction, error) {
 	var transaction entity.Transaction
-	connection, err := m.connect()
+	filter := bson.D{{Key: "transaction_id", Value: id}}
+	collection := m.client.Database(m.database).Collection(collectionTransactions)
+	err := collection.FindOne(m.ctx, filter).Decode(&transaction)
 	if err != nil {
-		return nil, err
-	}
-	defer m.disconnect(connection)
-
-	filter := bson.D{{"transaction_id", id}}
-	collection := connection.Database(m.database).Collection(collectionTransactions)
-	err = collection.FindOne(m.ctx, filter).Decode(&transaction)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get transaction %d: %w", id, err)
 	}
 	return &transaction, nil
 }
 
+// GetPaymentMethod retrieves the best available payment method for a user.
+// It first tries to get the default payment method, then falls back to the
+// method with the lowest fail count if no default exists or the default has failures.
 func (m *MongoDB) GetPaymentMethod(userId string) (*entity.PaymentMethod, error) {
-	connection, err := m.connect()
-	if err != nil {
-		return nil, err
-	}
-	defer m.disconnect(connection)
-
-	coll := connection.Database(m.database).Collection(collectionPaymentMethods)
+	coll := m.client.Database(m.database).Collection(collectionPaymentMethods)
 
 	// 1. try to get default
 	var pm entity.PaymentMethod
-	err = coll.FindOne(m.ctx, bson.D{{"user_id", userId}, {"is_default", true}}).Decode(&pm)
+	err := coll.FindOne(m.ctx, bson.D{{Key: "user_id", Value: userId}, {Key: "is_default", Value: true}}).Decode(&pm)
 	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, err
+		return nil, fmt.Errorf("get payment method for user %s: %w", userId, err)
 	}
 
-	// 2. if no default or fail count > 0
+	// 2. if no default or fail count > 0, search for min fail count
 	if errors.Is(err, mongo.ErrNoDocuments) || pm.FailCount > 0 {
-		// search for min fail count
-		opt := options.FindOne().SetSort(bson.D{{"fail_count", 1}, {"_id", 1}})
-		if err = coll.FindOne(m.ctx, bson.D{{"user_id", userId}}, opt).Decode(&pm); err != nil {
-			return nil, err
+		opt := options.FindOne().SetSort(bson.D{{Key: "fail_count", Value: 1}, {Key: "_id", Value: 1}})
+		if err = coll.FindOne(m.ctx, bson.D{{Key: "user_id", Value: userId}}, opt).Decode(&pm); err != nil {
+			return nil, fmt.Errorf("get payment method fallback for user %s: %w", userId, err)
 		}
 	}
 
 	return &pm, nil
 }
 
+// GetPaymentMethodByIdentifier retrieves a payment method by its unique identifier.
 func (m *MongoDB) GetPaymentMethodByIdentifier(identifier string) (*entity.PaymentMethod, error) {
-	connection, err := m.connect()
-	if err != nil {
-		return nil, err
-	}
-	defer m.disconnect(connection)
-
-	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
-	filter := bson.D{{"identifier", identifier}}
+	collection := m.client.Database(m.database).Collection(collectionPaymentMethods)
+	filter := bson.D{{Key: "identifier", Value: identifier}}
 	var paymentMethod *entity.PaymentMethod
-	err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
+	err := collection.FindOne(m.ctx, filter).Decode(&paymentMethod)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get payment method by identifier: %w", err)
 	}
 	return paymentMethod, nil
 }
 
+// UpdatePaymentMethodFailCount updates the fail counter for a payment method.
 func (m *MongoDB) UpdatePaymentMethodFailCount(identifier string, count int) error {
-	connection, err := m.connect()
-	if err != nil {
-		return err
-	}
-	defer m.disconnect(connection)
-
-	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
-	filter := bson.D{{"identifier", identifier}}
+	collection := m.client.Database(m.database).Collection(collectionPaymentMethods)
+	filter := bson.D{{Key: "identifier", Value: identifier}}
 	update := bson.D{
-		{"$set", bson.D{
-			{"fail_count", count},
+		{Key: "$set", Value: bson.D{
+			{Key: "fail_count", Value: count},
 		}},
 	}
-	if _, err = collection.UpdateOne(m.ctx, filter, update); err != nil {
-		return err
+	if _, err := collection.UpdateOne(m.ctx, filter, update); err != nil {
+		return fmt.Errorf("update payment method fail count: %w", err)
 	}
 	return nil
 }
 
+// GetPaymentOrderByTransaction retrieves an incomplete payment order for a transaction.
 func (m *MongoDB) GetPaymentOrderByTransaction(transactionId int) (*entity.PaymentOrder, error) {
-	connection, err := m.connect()
-	if err != nil {
-		return nil, err
-	}
-	defer m.disconnect(connection)
-
-	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
-	filter := bson.D{{"transaction_id", transactionId}, {"is_completed", false}}
+	collection := m.client.Database(m.database).Collection(collectionPaymentOrders)
+	filter := bson.D{{Key: "transaction_id", Value: transactionId}, {Key: "is_completed", Value: false}}
 	var order entity.PaymentOrder
-	if err = collection.FindOne(m.ctx, filter).Decode(&order); err != nil {
-		return nil, err
+	if err := collection.FindOne(m.ctx, filter).Decode(&order); err != nil {
+		return nil, fmt.Errorf("get payment order by transaction %d: %w", transactionId, err)
 	}
 	return &order, nil
 }
 
+// SavePaymentOrder saves or updates a payment order using upsert.
 func (m *MongoDB) SavePaymentOrder(order *entity.PaymentOrder) error {
-	connection, err := m.connect()
-	if err != nil {
-		return err
-	}
-	defer m.disconnect(connection)
-
-	filter := bson.D{{"order", order.Order}}
+	filter := bson.D{{Key: "order", Value: order.Order}}
 	set := bson.M{"$set": order}
-	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
-	_, err = collection.UpdateOne(m.ctx, filter, set, options.Update().SetUpsert(true))
+	collection := m.client.Database(m.database).Collection(collectionPaymentOrders)
+	_, err := collection.UpdateOne(m.ctx, filter, set, options.Update().SetUpsert(true))
 	if err != nil {
-		return err
+		return fmt.Errorf("save payment order %d: %w", order.Order, err)
 	}
 	return nil
 }
 
+// GetLastOrder retrieves the most recently opened payment order.
 func (m *MongoDB) GetLastOrder() (*entity.PaymentOrder, error) {
-	connection, err := m.connect()
-	if err != nil {
-		return nil, err
-	}
-	defer m.disconnect(connection)
-
-	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
+	collection := m.client.Database(m.database).Collection(collectionPaymentOrders)
 	filter := bson.D{}
 	var order entity.PaymentOrder
-	if err = collection.FindOne(m.ctx, filter, options.FindOne().SetSort(bson.D{{"time_opened", -1}})).Decode(&order); err != nil {
-		return nil, err
+	if err := collection.FindOne(m.ctx, filter, options.FindOne().SetSort(bson.D{{Key: "time_opened", Value: -1}})).Decode(&order); err != nil {
+		return nil, fmt.Errorf("get last order: %w", err)
 	}
 	return &order, nil
 }
 
-func (m *MongoDB) connect() (*mongo.Client, error) {
-	connection, err := mongo.Connect(m.ctx, m.clientOptions)
-	if err != nil {
-		return nil, err
-	}
-	return connection, nil
-}
-
-func (m *MongoDB) disconnect(connection *mongo.Client) {
-	err := connection.Disconnect(m.ctx)
-	if err != nil {
-		log.Println("mongodb disconnect error", err)
-	}
-}
-
+// NewMongoClient creates a new MongoDB client with a persistent connection pool.
+// The client maintains an active connection to MongoDB and should be reused throughout
+// the application lifecycle. Call Disconnect() when the application shuts down.
 func NewMongoClient(conf *config.Config) (*MongoDB, error) {
 	if !conf.Mongo.Enabled {
 		return nil, nil
 	}
+
+	ctx := context.Background()
 	connectionUri := fmt.Sprintf("mongodb://%s:%s", conf.Mongo.Host, conf.Mongo.Port)
 	clientOptions := options.Client().ApplyURI(connectionUri)
+
 	if conf.Mongo.User != "" {
 		clientOptions.SetAuth(options.Credential{
 			Username:   conf.Mongo.User,
@@ -188,127 +146,120 @@ func NewMongoClient(conf *config.Config) (*MongoDB, error) {
 			AuthSource: conf.Mongo.Database,
 		})
 	}
-	client := &MongoDB{
-		ctx:              context.Background(),
-		clientOptions:    clientOptions,
+
+	// Establish connection once at startup
+	client, err := mongo.Connect(ctx, clientOptions)
+	if err != nil {
+		return nil, fmt.Errorf("connect to mongodb: %w", err)
+	}
+
+	// Verify connection is working
+	if err = client.Ping(ctx, nil); err != nil {
+		client.Disconnect(ctx)
+		return nil, fmt.Errorf("ping mongodb: %w", err)
+	}
+
+	return &MongoDB{
+		client:           client,
+		ctx:              ctx,
 		database:         conf.Mongo.Database,
 		logRecordsNumber: conf.LogRecords,
-	}
-	return client, nil
+	}, nil
 }
 
+// Disconnect closes the MongoDB connection gracefully.
+// This should be called when the application shuts down.
+func (m *MongoDB) Disconnect() error {
+	if m.client == nil {
+		return nil
+	}
+	return m.client.Disconnect(m.ctx)
+}
+
+// WriteLogMessage writes a log message to the database.
 func (m *MongoDB) WriteLogMessage(data services.Data) error {
-	connection, err := m.connect()
+	collection := m.client.Database(m.database).Collection(collectionLog)
+	_, err := collection.InsertOne(m.ctx, data)
 	if err != nil {
-		return err
+		return fmt.Errorf("write log message: %w", err)
 	}
-	defer m.disconnect(connection)
-	collection := connection.Database(m.database).Collection(collectionLog)
-	_, err = collection.InsertOne(m.ctx, data)
-	return err
+	return nil
 }
 
+// GetUserTag retrieves a user tag (RFID card) by its identifier.
 func (m *MongoDB) GetUserTag(id string) (*entity.UserTag, error) {
-	connection, err := m.connect()
-	if err != nil {
-		return nil, err
-	}
-	defer m.disconnect(connection)
-
-	filter := bson.D{{"id_tag", id}}
-	collection := connection.Database(m.database).Collection(collectionUserTags)
+	filter := bson.D{{Key: "id_tag", Value: id}}
+	collection := m.client.Database(m.database).Collection(collectionUserTags)
 	var userTag entity.UserTag
-	err = collection.FindOne(m.ctx, filter).Decode(&userTag)
+	err := collection.FindOne(m.ctx, filter).Decode(&userTag)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get user tag %s: %w", id, err)
 	}
 	return &userTag, nil
 }
 
+// SavePaymentResult stores a payment response from Redsys for audit purposes.
 func (m *MongoDB) SavePaymentResult(paymentParameters *entity.PaymentParameters) error {
-	connection, err := m.connect()
+	collection := m.client.Database(m.database).Collection(collectionPayment)
+	_, err := collection.InsertOne(m.ctx, paymentParameters)
 	if err != nil {
-		return err
+		return fmt.Errorf("save payment result: %w", err)
 	}
-	defer m.disconnect(connection)
-
-	collection := connection.Database(m.database).Collection(collectionPayment)
-	_, err = collection.InsertOne(m.ctx, paymentParameters)
 	return nil
 }
 
+// GetPaymentOrder retrieves a payment order by its order number.
 func (m *MongoDB) GetPaymentOrder(id int) (*entity.PaymentOrder, error) {
-	connection, err := m.connect()
-	if err != nil {
-		return nil, err
-	}
-	defer m.disconnect(connection)
-
-	collection := connection.Database(m.database).Collection(collectionPaymentOrders)
-	filter := bson.D{{"order", id}}
+	collection := m.client.Database(m.database).Collection(collectionPaymentOrders)
+	filter := bson.D{{Key: "order", Value: id}}
 	var order entity.PaymentOrder
-	if err = collection.FindOne(m.ctx, filter).Decode(&order); err != nil {
-		return nil, err
+	if err := collection.FindOne(m.ctx, filter).Decode(&order); err != nil {
+		return nil, fmt.Errorf("get payment order %d: %w", id, err)
 	}
 	return &order, nil
 }
 
-// UpdateTransaction update transaction billed data
+// UpdateTransaction updates transaction payment billing data.
 func (m *MongoDB) UpdateTransaction(transaction *entity.Transaction) error {
-	connection, err := m.connect()
-	if err != nil {
-		return err
-	}
-	defer m.disconnect(connection)
-
-	collection := connection.Database(m.database).Collection(collectionTransactions)
-	filter := bson.D{{"transaction_id", transaction.Id}}
+	collection := m.client.Database(m.database).Collection(collectionTransactions)
+	filter := bson.D{{Key: "transaction_id", Value: transaction.Id}}
 	update := bson.D{
-		{"$set", bson.D{
-			{"payment_order", transaction.PaymentOrder},
-			{"payment_error", transaction.PaymentError},
-			{"payment_billed", transaction.PaymentBilled},
-			{"payment_orders", transaction.PaymentOrders},
+		{Key: "$set", Value: bson.D{
+			{Key: "payment_order", Value: transaction.PaymentOrder},
+			{Key: "payment_error", Value: transaction.PaymentError},
+			{Key: "payment_billed", Value: transaction.PaymentBilled},
+			{Key: "payment_orders", Value: transaction.PaymentOrders},
 		}},
 	}
-	if _, err = collection.UpdateOne(m.ctx, filter, update); err != nil {
-		return err
+	if _, err := collection.UpdateOne(m.ctx, filter, update); err != nil {
+		return fmt.Errorf("update transaction %d: %w", transaction.Id, err)
 	}
 	return nil
 }
 
+// GetPaymentMethodById retrieves a payment method by identifier and user ID.
 func (m *MongoDB) GetPaymentMethodById(identifier, userId string) (*entity.PaymentMethod, error) {
-	connection, err := m.connect()
-	if err != nil {
-		return nil, err
-	}
-	defer m.disconnect(connection)
-
-	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
-	filter := bson.D{{"identifier", identifier}, {"user_id", userId}}
+	collection := m.client.Database(m.database).Collection(collectionPaymentMethods)
+	filter := bson.D{{Key: "identifier", Value: identifier}, {Key: "user_id", Value: userId}}
 	var paymentMethod entity.PaymentMethod
-	if err = collection.FindOne(m.ctx, filter).Decode(&paymentMethod); err != nil {
-		return nil, err
+	if err := collection.FindOne(m.ctx, filter).Decode(&paymentMethod); err != nil {
+		return nil, fmt.Errorf("get payment method by id: %w", err)
 	}
 	return &paymentMethod, nil
 }
 
+// SavePaymentMethod saves a new payment method to the database.
+// Returns an error if a payment method with the same identifier already exists for the user.
 func (m *MongoDB) SavePaymentMethod(paymentMethod *entity.PaymentMethod) error {
 	saved, _ := m.GetPaymentMethodById(paymentMethod.Identifier, paymentMethod.UserId)
 	if saved != nil {
 		return fmt.Errorf("payment method with identifier %s... already exists", paymentMethod.Identifier[0:10])
 	}
 
-	connection, err := m.connect()
+	collection := m.client.Database(m.database).Collection(collectionPaymentMethods)
+	_, err := collection.InsertOne(m.ctx, paymentMethod)
 	if err != nil {
-		return err
-	}
-	defer m.disconnect(connection)
-
-	collection := connection.Database(m.database).Collection(collectionPaymentMethods)
-	_, err = collection.InsertOne(m.ctx, paymentMethod)
-	if err != nil {
-		return err
+		return fmt.Errorf("save payment method: %w", err)
 	}
 	return nil
 }
