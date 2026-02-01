@@ -81,22 +81,26 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) payTransaction(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	// Add request ID for tracing
+	ctx := WithRequestID(r.Context())
+	reqID := GetRequestID(ctx)
+
 	transactionId := ps.ByName("transaction_id")
 	if transactionId == "" {
-		s.logger.Warn("empty transaction id")
+		s.logger.Warn(fmt.Sprintf("[%s] empty transaction id", reqID))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	id, err := strconv.Atoi(transactionId)
 	if err != nil {
-		s.logger.Warn(fmt.Sprintf("invalid transaction id: %s; %v", transactionId, err))
+		s.logger.Warn(fmt.Sprintf("[%s] invalid transaction id: %s; %v", reqID, transactionId, err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	err = s.payments.PayTransaction(r.Context(), id)
+	err = s.payments.PayTransaction(ctx, id)
 	if err != nil {
-		s.logger.Error(fmt.Sprintf("pay transaction %v", id), err)
+		s.logger.Error(fmt.Sprintf("[%s] pay transaction %v", reqID, id), err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -105,15 +109,19 @@ func (s *Server) payTransaction(w http.ResponseWriter, r *http.Request, ps httpr
 }
 
 func (s *Server) returnOrder(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	// Add request ID for tracing
+	ctx := WithRequestID(r.Context())
+	reqID := GetRequestID(ctx)
+
 	orderId := ps.ByName("order_id")
 	if orderId == "" {
-		s.logger.Warn("return order: empty order id")
+		s.logger.Warn(fmt.Sprintf("[%s] return order: empty order id", reqID))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		s.logger.Error("return order: read request body", err)
+		s.logger.Error(fmt.Sprintf("[%s] return order: read request body", reqID), err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -121,15 +129,15 @@ func (s *Server) returnOrder(w http.ResponseWriter, r *http.Request, ps httprout
 	var order entity.PaymentOrder
 	err = json.Unmarshal(body, &order)
 	if err != nil {
-		s.logger.Error("return order: decode request body", err)
+		s.logger.Error(fmt.Sprintf("[%s] return order: decode request body", reqID), err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	s.logger.Info(fmt.Sprintf("processing request: return order %s, amount %d", orderId, order.Amount))
-	err = s.payments.ReturnByOrder(r.Context(), orderId, order.Amount)
+	s.logger.Info(fmt.Sprintf("[%s] processing request: return order %s, amount %d", reqID, orderId, order.Amount))
+	err = s.payments.ReturnByOrder(ctx, orderId, order.Amount)
 	if err != nil {
-		s.logger.Error(fmt.Sprintf("return order %s", orderId), err)
+		s.logger.Error(fmt.Sprintf("[%s] return order %s", reqID, orderId), err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -138,22 +146,26 @@ func (s *Server) returnOrder(w http.ResponseWriter, r *http.Request, ps httprout
 }
 
 func (s *Server) returnTransaction(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	// Add request ID for tracing
+	ctx := WithRequestID(r.Context())
+	reqID := GetRequestID(ctx)
+
 	transactionId := ps.ByName("transaction_id")
 	if transactionId == "" {
-		s.logger.Warn("empty transaction id")
+		s.logger.Warn(fmt.Sprintf("[%s] empty transaction id", reqID))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	id, err := strconv.Atoi(transactionId)
 	if err != nil {
-		s.logger.Warn(fmt.Sprintf("invalid transaction id: %s; %v", transactionId, err))
+		s.logger.Warn(fmt.Sprintf("[%s] invalid transaction id: %s; %v", reqID, transactionId, err))
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	err = s.payments.ReturnPayment(r.Context(), id)
+	err = s.payments.ReturnPayment(ctx, id)
 	if err != nil {
-		s.logger.Error(fmt.Sprintf("return transaction %v", id), err)
+		s.logger.Error(fmt.Sprintf("[%s] return transaction %v", reqID, id), err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -162,17 +174,20 @@ func (s *Server) returnTransaction(w http.ResponseWriter, r *http.Request, ps ht
 }
 
 func (s *Server) paymentNotify(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	// Add request ID for tracing
+	ctx := WithRequestID(r.Context())
+	reqID := GetRequestID(ctx)
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		s.logger.Error("payment notify: get body", err)
+		s.logger.Error(fmt.Sprintf("[%s] payment notify: get body", reqID), err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	err = s.payments.Notify(r.Context(), body)
+	err = s.payments.Notify(ctx, body)
 	if err != nil {
-		s.logger.Error("payment notify: process body", err)
+		s.logger.Error(fmt.Sprintf("[%s] payment notify: process body", reqID), err)
 	}
 	w.WriteHeader(http.StatusOK)
 }

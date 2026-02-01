@@ -18,11 +18,13 @@ import (
 )
 
 // Payments handles payment processing with Redsys payment gateway.
+// It uses fine-grained locking per transaction/order to allow concurrent operations
+// while preventing race conditions.
 type Payments struct {
 	conf       *config.Config
 	database   services.Database
 	logger     services.LogHandler
-	mutex      *sync.Mutex
+	locks      sync.Map // map[int]*sync.Mutex for per-order locking
 	requestUrl string
 	httpClient *http.Client
 }
@@ -33,7 +35,7 @@ func NewPayments(config *config.Config) *Payments {
 	return &Payments{
 		conf:       config,
 		requestUrl: config.Merchant.RequestUrl,
-		mutex:      &sync.Mutex{},
+		locks:      sync.Map{},
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
@@ -46,12 +48,22 @@ func NewPayments(config *config.Config) *Payments {
 	}
 }
 
-func (p *Payments) Lock() {
-	p.mutex.Lock()
+// lockOrder acquires a lock for a specific transaction/order to prevent concurrent modifications.
+// This allows multiple different orders to be processed in parallel while ensuring
+// safety for operations on the same order.
+func (p *Payments) lockOrder(id int) *sync.Mutex {
+	value, _ := p.locks.LoadOrStore(id, &sync.Mutex{})
+	mutex := value.(*sync.Mutex)
+	mutex.Lock()
+	return mutex
 }
 
-func (p *Payments) Unlock() {
-	p.mutex.Unlock()
+// unlockOrder releases the lock for a transaction/order and cleans up the mutex
+// from the map to prevent memory leaks.
+func (p *Payments) unlockOrder(id int, mutex *sync.Mutex) {
+	mutex.Unlock()
+	// Clean up mutex from map to prevent unbounded growth
+	p.locks.Delete(id)
 }
 
 func (p *Payments) SetDatabase(database services.Database) {
@@ -68,9 +80,9 @@ func (p *Payments) SetLogger(logger services.LogHandler) {
 }
 
 // Notify processes a payment notification webhook from Redsys.
+// Note: Notify doesn't lock because it processes asynchronously and doesn't
+// directly modify shared state - the async processResponse handles its own locking.
 func (p *Payments) Notify(ctx context.Context, data []byte) error {
-	p.Lock()
-	defer p.Unlock()
 
 	params, err := url.ParseQuery(string(data))
 	if err != nil {
@@ -86,15 +98,18 @@ func (p *Payments) Notify(ctx context.Context, data []byte) error {
 
 	response, err := p.readParameters(paymentResult.Parameters)
 	if response != nil {
-		go p.processResponse(ctx, response)
+		// Process payment response asynchronously with panic recovery
+		go p.processResponseWithRecovery(ctx, response)
 	}
 	return err
 }
 
 // PayTransaction initiates a payment for a finished charging transaction.
+// Uses per-transaction locking to allow concurrent payments for different transactions.
 func (p *Payments) PayTransaction(ctx context.Context, transactionId int) error {
-	p.Lock()
-	defer p.Unlock()
+	mutex := p.lockOrder(transactionId)
+	defer p.unlockOrder(transactionId, mutex)
+
 	p.logger.Info(fmt.Sprintf("pay transaction %v", transactionId))
 
 	if p.conf.Merchant.Secret == "" || p.conf.Merchant.Code == "" || p.conf.Merchant.Terminal == "" {
@@ -231,15 +246,17 @@ func (p *Payments) PayTransaction(ctx context.Context, transactionId int) error 
 		return err
 	}
 
-	go p.processRequest(ctx, request, paymentOrder.Order)
+	// Process payment request asynchronously with timeout
+	go p.processRequestWithTimeout(ctx, request, paymentOrder.Order)
 
 	return nil
 }
 
 // ReturnPayment processes a refund for a charging transaction.
+// Uses per-transaction locking to allow concurrent operations.
 func (p *Payments) ReturnPayment(ctx context.Context, transactionId int) error {
-	p.Lock()
-	defer p.Unlock()
+	mutex := p.lockOrder(transactionId)
+	defer p.unlockOrder(transactionId, mutex)
 
 	transaction, err := p.getTransaction(ctx, transactionId)
 	if err != nil {
@@ -272,16 +289,15 @@ func (p *Payments) ReturnPayment(ctx context.Context, transactionId int) error {
 		return err
 	}
 
-	go p.processRequest(ctx, request, transaction.PaymentOrder)
+	// Process refund request asynchronously with timeout
+	go p.processRequestWithTimeout(ctx, request, transaction.PaymentOrder)
 
 	return nil
 }
 
 // ReturnByOrder processes a refund for a specific payment order.
+// Uses per-order locking to allow concurrent refund operations.
 func (p *Payments) ReturnByOrder(ctx context.Context, orderId string, amount int) error {
-	p.Lock()
-	defer p.Unlock()
-
 	if amount == 0 {
 		return fmt.Errorf("amount to return is zero")
 	}
@@ -292,6 +308,9 @@ func (p *Payments) ReturnByOrder(ctx context.Context, orderId string, amount int
 	if err != nil {
 		return fmt.Errorf("invalid order id: %s; %v", orderId, err)
 	}
+
+	mutex := p.lockOrder(id)
+	defer p.unlockOrder(id, mutex)
 	order, err := p.database.GetPaymentOrder(ctx, id)
 	if err != nil {
 		return fmt.Errorf("get payment order: %v", err)
@@ -315,7 +334,8 @@ func (p *Payments) ReturnByOrder(ctx context.Context, orderId string, amount int
 		return err
 	}
 
-	go p.processRequest(ctx, request, id)
+	// Process refund request asynchronously with timeout
+	go p.processRequestWithTimeout(ctx, request, id)
 
 	return nil
 }
@@ -370,8 +390,38 @@ func (p *Payments) createParameters(parameters *entity.MerchantParameters) (stri
 	return base64.StdEncoding.EncodeToString(parametersJson), nil
 }
 
+// processRequestWithTimeout wraps processRequest with timeout and panic recovery.
+// This ensures goroutines don't hang indefinitely and panics are logged.
+func (p *Payments) processRequestWithTimeout(parentCtx context.Context, request *entity.PaymentRequest, orderId int) {
+	// Recover from panics in goroutine
+	defer func() {
+		if r := recover(); r != nil {
+			p.logger.Error("panic in processRequest", fmt.Errorf("panic: %v", r))
+		}
+	}()
+
+	// Create context with timeout for external API call
+	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
+	defer cancel()
+
+	p.processRequest(ctx, request, orderId)
+}
+
+// processResponseWithRecovery wraps processResponse with panic recovery.
+func (p *Payments) processResponseWithRecovery(ctx context.Context, response *entity.PaymentParameters) {
+	// Recover from panics in goroutine
+	defer func() {
+		if r := recover(); r != nil {
+			p.logger.Error("panic in processResponse", fmt.Errorf("panic: %v", r))
+		}
+	}()
+
+	p.processResponse(ctx, response)
+}
+
 // processRequest sends a payment request to Redsys and processes the response.
 // This runs in a goroutine to avoid blocking the HTTP handler.
+// The context should have a timeout to prevent hanging.
 func (p *Payments) processRequest(ctx context.Context, request *entity.PaymentRequest, orderId int) {
 	requestData, err := json.Marshal(request)
 	if err != nil {
@@ -379,12 +429,30 @@ func (p *Payments) processRequest(ctx context.Context, request *entity.PaymentRe
 		return
 	}
 
-	response, err := p.httpClient.Post(p.requestUrl, "application/json", bytes.NewBuffer(requestData))
+	// Create HTTP request with context for timeout/cancellation support
+	req, err := http.NewRequestWithContext(ctx, "POST", p.requestUrl, bytes.NewBuffer(requestData))
 	if err != nil {
-		p.logger.Error("post request", err)
+		p.logger.Error("create http request", err)
 		return
 	}
-	defer response.Body.Close()
+	req.Header.Set("Content-Type", "application/json")
+
+	response, err := p.httpClient.Do(req)
+	if err != nil {
+		// Check if error was due to timeout/cancellation
+		if ctx.Err() != nil {
+			p.logger.Error("request timeout or cancelled", ctx.Err())
+		} else {
+			p.logger.Error("post request", err)
+		}
+		return
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			p.logger.Error("close response body", err)
+		}
+	}(response.Body)
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
@@ -448,6 +516,12 @@ func (p *Payments) readParameters(parameters string) (*entity.PaymentParameters,
 }
 
 func (p *Payments) processResponse(ctx context.Context, paymentResult *entity.PaymentParameters) {
+	// Add timeout for database operations if not already set
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
 
 	p.logger.Info(fmt.Sprintf("response: type: %s; result: %s; order: %s; amount: %s", paymentResult.TransactionType, paymentResult.Response, paymentResult.Order, paymentResult.Amount))
 	err := p.database.SavePaymentResult(ctx, paymentResult)
