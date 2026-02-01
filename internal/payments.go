@@ -405,6 +405,7 @@ func (p *Payments) createParameters(parameters *entity.MerchantParameters) (stri
 
 // processRequestWithTimeout wraps processRequest with timeout and panic recovery.
 // This ensures goroutines don't hang indefinitely and panics are logged.
+// Creates a detached context to prevent cancellation when HTTP request completes.
 func (p *Payments) processRequestWithTimeout(parentCtx context.Context, request *entity.PaymentRequest, orderId int) {
 	// Recover from panics in goroutine
 	defer func() {
@@ -413,15 +414,28 @@ func (p *Payments) processRequestWithTimeout(parentCtx context.Context, request 
 		}
 	}()
 
-	// Create context with timeout for external API call
-	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
+	// Extract request ID from parent context before it gets canceled
+	reqID := GetRequestID(parentCtx)
+
+	// Create a detached background context to prevent cancellation when HTTP request completes
+	// The async payment processing must continue even after the HTTP handler returns
+	backgroundCtx := context.Background()
+
+	// Add request ID to the detached context for tracing
+	if reqID != "" {
+		backgroundCtx = context.WithValue(backgroundCtx, contextKey("requestID"), reqID)
+	}
+
+	// Create context with timeout for external API call (30s)
+	ctx, cancel := context.WithTimeout(backgroundCtx, 30*time.Second)
 	defer cancel()
 
 	p.processRequest(ctx, request, orderId)
 }
 
 // processResponseWithRecovery wraps processResponse with panic recovery.
-func (p *Payments) processResponseWithRecovery(ctx context.Context, response *entity.PaymentParameters) {
+// Creates a detached context to prevent cancellation when HTTP request completes.
+func (p *Payments) processResponseWithRecovery(parentCtx context.Context, response *entity.PaymentParameters) {
 	// Recover from panics in goroutine
 	defer func() {
 		if r := recover(); r != nil {
@@ -429,7 +443,20 @@ func (p *Payments) processResponseWithRecovery(ctx context.Context, response *en
 		}
 	}()
 
-	p.processResponse(ctx, response)
+	// Extract request ID from parent context before it gets canceled
+	reqID := GetRequestID(parentCtx)
+
+	// Create a detached background context to prevent cancellation when HTTP request completes
+	// The async response processing must continue even after the webhook handler returns
+	backgroundCtx := context.Background()
+
+	// Add request ID to the detached context for tracing
+	if reqID != "" {
+		backgroundCtx = context.WithValue(backgroundCtx, contextKey("requestID"), reqID)
+	}
+
+	// processResponse will add its own timeout if needed
+	p.processResponse(backgroundCtx, response)
 }
 
 // processRequest sends a payment request to Redsys and processes the response.

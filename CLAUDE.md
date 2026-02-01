@@ -111,6 +111,10 @@ go mod tidy
 - Panic recovery with error logging
 - Context-aware HTTP requests for proper cancellation
 - No unbounded goroutine spawning
+- **Detached contexts for async operations**: Async goroutines use `context.Background()` with request ID preserved
+  - Prevents cancellation when HTTP handler returns
+  - Critical for payment requests that must complete after HTTP response is sent
+  - Request ID extracted from parent context and added to detached context for tracing
 
 **Request ID Tracking**:
 - Unique ID generated for each HTTP request
