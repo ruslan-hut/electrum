@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"electrum/services"
 	"fmt"
 	"log"
@@ -101,7 +102,9 @@ func (l *Logger) sendToMessageService(message *services.LogMessage) {
 
 func (l *Logger) writeToDatabase(message *services.LogMessage) {
 	if l.database != nil {
-		if err := l.database.WriteLogMessage(message); err != nil {
+		// Use background context for async log writes
+		ctx := context.Background()
+		if err := l.database.WriteLogMessage(ctx, message); err != nil {
 			l.internalError("write to database", err)
 		}
 	}

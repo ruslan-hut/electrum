@@ -80,7 +80,7 @@ func (s *Server) Start() error {
 	return err
 }
 
-func (s *Server) payTransaction(w http.ResponseWriter, _ *http.Request, ps httprouter.Params) {
+func (s *Server) payTransaction(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	transactionId := ps.ByName("transaction_id")
 	if transactionId == "" {
 		s.logger.Warn("empty transaction id")
@@ -94,7 +94,7 @@ func (s *Server) payTransaction(w http.ResponseWriter, _ *http.Request, ps httpr
 		return
 	}
 
-	err = s.payments.PayTransaction(id)
+	err = s.payments.PayTransaction(r.Context(), id)
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("pay transaction %v", id), err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -127,7 +127,7 @@ func (s *Server) returnOrder(w http.ResponseWriter, r *http.Request, ps httprout
 	}
 
 	s.logger.Info(fmt.Sprintf("processing request: return order %s, amount %d", orderId, order.Amount))
-	err = s.payments.ReturnByOrder(orderId, order.Amount)
+	err = s.payments.ReturnByOrder(r.Context(), orderId, order.Amount)
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("return order %s", orderId), err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -137,7 +137,7 @@ func (s *Server) returnOrder(w http.ResponseWriter, r *http.Request, ps httprout
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *Server) returnTransaction(w http.ResponseWriter, _ *http.Request, ps httprouter.Params) {
+func (s *Server) returnTransaction(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	transactionId := ps.ByName("transaction_id")
 	if transactionId == "" {
 		s.logger.Warn("empty transaction id")
@@ -151,7 +151,7 @@ func (s *Server) returnTransaction(w http.ResponseWriter, _ *http.Request, ps ht
 		return
 	}
 
-	err = s.payments.ReturnPayment(id)
+	err = s.payments.ReturnPayment(r.Context(), id)
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("return transaction %v", id), err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -170,7 +170,7 @@ func (s *Server) paymentNotify(w http.ResponseWriter, r *http.Request, _ httprou
 		return
 	}
 
-	err = s.payments.Notify(body)
+	err = s.payments.Notify(r.Context(), body)
 	if err != nil {
 		s.logger.Error("payment notify: process body", err)
 	}

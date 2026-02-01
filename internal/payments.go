@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bytes"
+	"context"
 	"electrum/config"
 	"electrum/entity"
 	"electrum/services"
@@ -66,7 +67,8 @@ func (p *Payments) SetLogger(logger services.LogHandler) {
 	}
 }
 
-func (p *Payments) Notify(data []byte) error {
+// Notify processes a payment notification webhook from Redsys.
+func (p *Payments) Notify(ctx context.Context, data []byte) error {
 	p.Lock()
 	defer p.Unlock()
 
@@ -84,12 +86,13 @@ func (p *Payments) Notify(data []byte) error {
 
 	response, err := p.readParameters(paymentResult.Parameters)
 	if response != nil {
-		go p.processResponse(response)
+		go p.processResponse(ctx, response)
 	}
 	return err
 }
 
-func (p *Payments) PayTransaction(transactionId int) error {
+// PayTransaction initiates a payment for a finished charging transaction.
+func (p *Payments) PayTransaction(ctx context.Context, transactionId int) error {
 	p.Lock()
 	defer p.Unlock()
 	p.logger.Info(fmt.Sprintf("pay transaction %v", transactionId))
@@ -98,7 +101,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		return fmt.Errorf("merchant not configured")
 	}
 
-	transaction, err := p.getTransaction(transactionId)
+	transaction, err := p.getTransaction(ctx, transactionId)
 	if err != nil {
 		p.logger.Error(fmt.Sprintf("pay transaction %v", transactionId), err)
 		return err
@@ -112,7 +115,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	// --------------------------------------------- USER TAG
 	tag := transaction.UserTag
 	if tag == nil {
-		tag, err = p.database.GetUserTag(transaction.IdTag)
+		tag, err = p.database.GetUserTag(ctx, transaction.IdTag)
 		if err != nil {
 			p.logger.Error("get user tag", err)
 			return err
@@ -122,7 +125,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		//p.logger.Warn(fmt.Sprintf("empty user id for tag %v", tag.IdTag))
 
 		transaction.PaymentBilled = transaction.PaymentAmount
-		err = p.database.UpdateTransaction(transaction)
+		err = p.database.UpdateTransaction(ctx, transaction)
 		if err != nil {
 			p.logger.Error("update transaction", err)
 		}
@@ -133,12 +136,12 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	// --------------------------------------------- PAYMENT METHOD
 	paymentMethod := transaction.PaymentMethod
 	if paymentMethod == nil {
-		paymentMethod, err = p.database.GetPaymentMethod(tag.UserId)
+		paymentMethod, err = p.database.GetPaymentMethod(ctx, tag.UserId)
 		if err != nil {
 			//p.logger.Error("failed to get payment method", err)
 
 			transaction.PaymentBilled = transaction.PaymentAmount
-			err = p.database.UpdateTransaction(transaction)
+			err = p.database.UpdateTransaction(ctx, transaction)
 			if err != nil {
 				p.logger.Error("update transaction", err)
 			}
@@ -148,7 +151,7 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	}
 	// try to get another payment method if the current has some problems or the transaction has previous errors
 	if paymentMethod.CofTid == "" || paymentMethod.FailCount > 0 || transaction.PaymentError != "" {
-		storedPM, _ := p.database.GetPaymentMethod(tag.UserId)
+		storedPM, _ := p.database.GetPaymentMethod(ctx, tag.UserId)
 		if storedPM != nil && storedPM.Identifier != paymentMethod.Identifier {
 			paymentMethod = storedPM
 			p.logger.Warn(fmt.Sprintf("payment method loaded from db: %s", secret(storedPM.Identifier)))
@@ -158,21 +161,21 @@ func (p *Payments) PayTransaction(transactionId int) error {
 	consumed := (transaction.MeterStop - transaction.MeterStart) / 1000
 	description := fmt.Sprintf("%s:%d %dkW", transaction.ChargePointId, transaction.ConnectorId, consumed)
 
-	orderToClose, err := p.database.GetPaymentOrderByTransaction(transaction.Id)
+	orderToClose, err := p.database.GetPaymentOrderByTransaction(ctx, transaction.Id)
 	if err == nil && orderToClose != nil {
 		orderToClose.IsCompleted = true
 		orderToClose.Result = "closed without response"
 		orderToClose.TimeClosed = time.Now()
-		if err := p.database.SavePaymentOrder(orderToClose); err != nil {
+		if err := p.database.SavePaymentOrder(ctx, orderToClose); err != nil {
 			p.logger.Error("failed to close previous payment order", err)
 		}
-		p.updatePaymentMethodFailCounter(orderToClose.Identifier, 1)
+		p.updatePaymentMethodFailCounter(ctx, orderToClose.Identifier, 1)
 	}
 
 	//---------------------------------------------
 	if p.conf.DisablePayment {
 		transaction.PaymentBilled = transaction.PaymentAmount
-		err = p.database.UpdateTransaction(transaction)
+		err = p.database.UpdateTransaction(ctx, transaction)
 		if err != nil {
 			p.logger.Error("update transaction", err)
 		}
@@ -191,14 +194,14 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		TimeOpened:    time.Now(),
 	}
 
-	lastOrder, _ := p.database.GetLastOrder()
+	lastOrder, _ := p.database.GetLastOrder(ctx)
 	if lastOrder != nil {
 		paymentOrder.Order = lastOrder.Order + 1
 	} else {
 		paymentOrder.Order = 1200
 	}
 
-	err = p.database.SavePaymentOrder(&paymentOrder)
+	err = p.database.SavePaymentOrder(ctx, &paymentOrder)
 	if err != nil {
 		p.logger.Error("save order", err)
 		return err
@@ -228,16 +231,17 @@ func (p *Payments) PayTransaction(transactionId int) error {
 		return err
 	}
 
-	go p.processRequest(request, paymentOrder.Order)
+	go p.processRequest(ctx, request, paymentOrder.Order)
 
 	return nil
 }
 
-func (p *Payments) ReturnPayment(transactionId int) error {
+// ReturnPayment processes a refund for a charging transaction.
+func (p *Payments) ReturnPayment(ctx context.Context, transactionId int) error {
 	p.Lock()
 	defer p.Unlock()
 
-	transaction, err := p.getTransaction(transactionId)
+	transaction, err := p.getTransaction(ctx, transactionId)
 	if err != nil {
 		p.logger.Error(fmt.Sprintf("return transaction %v", transactionId), err)
 		return err
@@ -268,12 +272,13 @@ func (p *Payments) ReturnPayment(transactionId int) error {
 		return err
 	}
 
-	go p.processRequest(request, transaction.PaymentOrder)
+	go p.processRequest(ctx, request, transaction.PaymentOrder)
 
 	return nil
 }
 
-func (p *Payments) ReturnByOrder(orderId string, amount int) error {
+// ReturnByOrder processes a refund for a specific payment order.
+func (p *Payments) ReturnByOrder(ctx context.Context, orderId string, amount int) error {
 	p.Lock()
 	defer p.Unlock()
 
@@ -287,7 +292,7 @@ func (p *Payments) ReturnByOrder(orderId string, amount int) error {
 	if err != nil {
 		return fmt.Errorf("invalid order id: %s; %v", orderId, err)
 	}
-	order, err := p.database.GetPaymentOrder(id)
+	order, err := p.database.GetPaymentOrder(ctx, id)
 	if err != nil {
 		return fmt.Errorf("get payment order: %v", err)
 	}
@@ -310,7 +315,7 @@ func (p *Payments) ReturnByOrder(orderId string, amount int) error {
 		return err
 	}
 
-	go p.processRequest(request, id)
+	go p.processRequest(ctx, request, id)
 
 	return nil
 }
@@ -340,11 +345,11 @@ func (p *Payments) newRequest(parameters *entity.MerchantParameters) (*entity.Pa
 	return request, nil
 }
 
-func (p *Payments) getTransaction(transactionId int) (*entity.Transaction, error) {
+func (p *Payments) getTransaction(ctx context.Context, transactionId int) (*entity.Transaction, error) {
 	if p.database == nil {
 		return nil, fmt.Errorf("database not set")
 	}
-	transaction, err := p.database.GetTransaction(transactionId)
+	transaction, err := p.database.GetTransaction(ctx, transactionId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transaction %v", transactionId)
 	}
@@ -367,7 +372,7 @@ func (p *Payments) createParameters(parameters *entity.MerchantParameters) (stri
 
 // processRequest sends a payment request to Redsys and processes the response.
 // This runs in a goroutine to avoid blocking the HTTP handler.
-func (p *Payments) processRequest(request *entity.PaymentRequest, orderId int) {
+func (p *Payments) processRequest(ctx context.Context, request *entity.PaymentRequest, orderId int) {
 	requestData, err := json.Marshal(request)
 	if err != nil {
 		p.logger.Error("create request", err)
@@ -395,15 +400,15 @@ func (p *Payments) processRequest(request *entity.PaymentRequest, orderId int) {
 			p.logger.Warn(fmt.Sprintf("unrecognized response: %s", string(body)))
 		} else {
 			p.logger.Warn(fmt.Sprintf("response error code: %s", code))
-			order, _ := p.database.GetPaymentOrder(orderId)
+			order, _ := p.database.GetPaymentOrder(ctx, orderId)
 			if order != nil {
-				p.closeOrderOnError(order, code)
+				p.closeOrderOnError(ctx, order, code)
 			}
 		}
 		return
 	}
 
-	p.processResponse(paymentResult)
+	p.processResponse(ctx, paymentResult)
 }
 
 func (p *Payments) readResponse(body []byte) (*entity.PaymentParameters, error) {
@@ -442,10 +447,10 @@ func (p *Payments) readParameters(parameters string) (*entity.PaymentParameters,
 	return &paymentResult, nil
 }
 
-func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
+func (p *Payments) processResponse(ctx context.Context, paymentResult *entity.PaymentParameters) {
 
 	p.logger.Info(fmt.Sprintf("response: type: %s; result: %s; order: %s; amount: %s", paymentResult.TransactionType, paymentResult.Response, paymentResult.Order, paymentResult.Amount))
-	err := p.database.SavePaymentResult(paymentResult)
+	err := p.database.SavePaymentResult(ctx, paymentResult)
 	if err != nil {
 		p.logger.Error("save payment result", err)
 	}
@@ -460,7 +465,7 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 		p.logger.Error("read amount", err)
 		return
 	}
-	order, err := p.database.GetPaymentOrder(number)
+	order, err := p.database.GetPaymentOrder(ctx, number)
 	if err != nil {
 		p.logger.Error("get payment order", err)
 		return
@@ -473,7 +478,7 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 		order.Currency = paymentResult.Currency
 		order.Date = fmt.Sprintf("%s %s", paymentResult.Date, paymentResult.Hour)
 
-		err = p.database.SavePaymentOrder(order)
+		err = p.database.SavePaymentOrder(ctx, order)
 		if err != nil {
 			p.logger.Error("save payment order", err)
 		}
@@ -481,16 +486,16 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 
 	err = p.checkPaymentResult(paymentResult)
 	if err != nil {
-		p.closeOrderOnError(order, paymentResult.Response)
+		p.closeOrderOnError(ctx, order, paymentResult.Response)
 		return
 	}
-	p.updatePaymentMethodFailCounter(order.Identifier, 0)
+	p.updatePaymentMethodFailCounter(ctx, order.Identifier, 0)
 
 	// if transaction type is 3, then it is a refund
 	if paymentResult.TransactionType == "3" {
 		order.RefundAmount = amount
 		order.RefundTime = time.Now()
-		err = p.database.SavePaymentOrder(order)
+		err = p.database.SavePaymentOrder(ctx, order)
 		if err != nil {
 			p.logger.Error("save payment order", err)
 		}
@@ -499,7 +504,7 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 
 	if order.TransactionId > 0 {
 
-		transaction, e := p.database.GetTransaction(order.TransactionId)
+		transaction, e := p.database.GetTransaction(ctx, order.TransactionId)
 		if e != nil {
 			p.logger.Error("get transaction", e)
 			return
@@ -510,7 +515,7 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 		transaction.PaymentError = ""
 		transaction.AddOrder(*order)
 
-		e = p.database.UpdateTransaction(transaction)
+		e = p.database.UpdateTransaction(ctx, transaction)
 		if e != nil {
 			p.logger.Error("update transaction", e)
 			return
@@ -528,7 +533,7 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 			UserId:      order.UserId,
 			UserName:    order.UserName,
 		}
-		err = p.savePaymentMethod(&paymentMethod)
+		err = p.savePaymentMethod(ctx, &paymentMethod)
 		if err != nil {
 			p.logger.Error("save payment method", err)
 		} else {
@@ -538,7 +543,7 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 		//after saving payment method, need to refund the amount
 		if order.Amount > 0 {
 			id := fmt.Sprintf("%d", order.Order)
-			err = p.ReturnByOrder(id, order.Amount)
+			err = p.ReturnByOrder(ctx, id, order.Amount)
 			if err != nil {
 				p.logger.Error("refund payment", err)
 				return
@@ -551,14 +556,14 @@ func (p *Payments) processResponse(paymentResult *entity.PaymentParameters) {
 
 // closeOrderOnError marks a payment order as failed and closes it.
 // This is called when payment processing encounters an error.
-func (p *Payments) closeOrderOnError(order *entity.PaymentOrder, result string) {
-	p.updatePaymentMethodFailCounter(order.Identifier, 1)
+func (p *Payments) closeOrderOnError(ctx context.Context, order *entity.PaymentOrder, result string) {
+	p.updatePaymentMethodFailCounter(ctx, order.Identifier, 1)
 
 	if !order.IsCompleted {
 		order.IsCompleted = true
 		order.Result = result
 		order.TimeClosed = time.Now()
-		if err := p.database.SavePaymentOrder(order); err != nil {
+		if err := p.database.SavePaymentOrder(ctx, order); err != nil {
 			p.logger.Error("failed to save payment order on error", err)
 		}
 	}
@@ -566,7 +571,7 @@ func (p *Payments) closeOrderOnError(order *entity.PaymentOrder, result string) 
 	// close transaction on payment error; temporary solution
 	if order.TransactionId > 0 {
 		p.logger.Info(fmt.Sprintf("close transaction %v on payment error", order.TransactionId))
-		transaction, e := p.database.GetTransaction(order.TransactionId)
+		transaction, e := p.database.GetTransaction(ctx, order.TransactionId)
 		if e != nil {
 			p.logger.Error("get transaction", e)
 			return
@@ -575,21 +580,21 @@ func (p *Payments) closeOrderOnError(order *entity.PaymentOrder, result string) 
 		transaction.PaymentOrder = order.Order
 		transaction.PaymentError = result
 		transaction.AddOrder(*order)
-		e = p.database.UpdateTransaction(transaction)
+		e = p.database.UpdateTransaction(ctx, transaction)
 		if e != nil {
 			p.logger.Error("update transaction", e)
 		}
 	}
 }
 
-func (p *Payments) savePaymentMethod(pm *entity.PaymentMethod) error {
+func (p *Payments) savePaymentMethod(ctx context.Context, pm *entity.PaymentMethod) error {
 	if pm.UserId == "" {
 		return fmt.Errorf("empty user id")
 	}
 	if pm.Identifier == "" {
 		return fmt.Errorf("empty identifier")
 	}
-	return p.database.SavePaymentMethod(pm)
+	return p.database.SavePaymentMethod(ctx, pm)
 }
 
 func (p *Payments) checkPaymentResult(result *entity.PaymentParameters) error {
@@ -608,12 +613,12 @@ func (p *Payments) checkPaymentResult(result *entity.PaymentParameters) error {
 	return fmt.Errorf("code %s; transaction type %s", result.Response, result.TransactionType)
 }
 
-func (p *Payments) updatePaymentMethodFailCounter(identifier string, count int) {
+func (p *Payments) updatePaymentMethodFailCounter(ctx context.Context, identifier string, count int) {
 	if p.database == nil || identifier == "" {
 		return
 	}
 
-	paymentMethod, err := p.database.GetPaymentMethodByIdentifier(identifier)
+	paymentMethod, err := p.database.GetPaymentMethodByIdentifier(ctx, identifier)
 	if err != nil {
 		p.logger.Error("get payment method", err)
 		return
@@ -628,7 +633,7 @@ func (p *Payments) updatePaymentMethodFailCounter(identifier string, count int) 
 	} else {
 		paymentMethod.FailCount++
 	}
-	err = p.database.UpdatePaymentMethodFailCount(identifier, paymentMethod.FailCount)
+	err = p.database.UpdatePaymentMethodFailCount(ctx, identifier, paymentMethod.FailCount)
 	if err != nil {
 		p.logger.Error("update payment method", err)
 	}

@@ -1,8 +1,12 @@
 package services
 
+import "context"
+
+// Payments provides payment processing operations.
+// All methods accept context.Context for proper timeout and cancellation support.
 type Payments interface {
-	Notify(data []byte) error
-	PayTransaction(transactionId int) error
-	ReturnPayment(transactionId int) error
-	ReturnByOrder(orderId string, amount int) error
+	Notify(ctx context.Context, data []byte) error
+	PayTransaction(ctx context.Context, transactionId int) error
+	ReturnPayment(ctx context.Context, transactionId int) error
+	ReturnByOrder(ctx context.Context, orderId string, amount int) error
 }
